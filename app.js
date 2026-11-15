@@ -605,7 +605,7 @@ const seg = (opts, val, key, toggle = true) => opts.map(([k, l]) => `<button typ
 function fillPeek(full) {
   const it = items.find(i => i.id === peekId); if (!it) { closePeek(); return; }
   const z = zoneOf(it);
-  $("#pkHead").innerHTML = `<span class="zdot" style="--c:${z.color}"></span><span>${z.name} · added ${new Date(it.createdAt || Date.now()).toLocaleDateString("en", { day: "numeric", month: "short" })}${it.source === "claude" ? " · by Claude" : it.source === "obsidian" ? " · from Obsidian" : ""}</span><button class="btn sm icon" data-act="closepeek" aria-label="Close">${ico("x", 20)}</button>`;
+  $("#pkHead").innerHTML = `<span class="zdot" style="--c:${z.color}"></span><span>${z.name} · added ${new Date(it.createdAt || Date.now()).toLocaleDateString("en", { day: "numeric", month: "short" })}${it.source === "claude" ? " · by Claude" : it.source === "openclaw" ? " · from OpenClaw" : it.source === "obsidian" ? " · from Obsidian" : ""}</span><button class="btn sm icon" data-act="closepeek" aria-label="Close">${ico("x", 20)}</button>`;
   const ae = document.activeElement;
   if (full || ae !== $("#pkTitle")) $("#pkTitle").value = it.title || "";
   if (full || ae !== $("#pkNotes")) $("#pkNotes").value = it.notes || "";
