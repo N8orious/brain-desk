@@ -348,7 +348,7 @@ function renderTop(mode) {
   const date = d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long" });
   if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>GitHub sync</h1><p class="line">Where your desk is saved.</p></div>`; return; }
   const title = view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "Board" : "Done";
-  const line = view === "now" ? "Everything you've got going. Tap a switch to mark it active." : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
+  const line = view === "now" ? `${m.name}: ${FOR_MODE[mode] || ""}. Tap a switch to mark what's active.` : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
   const ov = override && view === "today" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
   $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>${title}</h1><p class="line">${esc(line)}</p>${ov}</div>
     ${view === "today" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
@@ -573,6 +573,17 @@ function vSleep() {
    He marks a stream active or inactive by tapping its switch; that's saved in items.json under "streams"
    (keys like "w:Zoca", "b:Peeko", "l:life"), so Task Master can flip it too with `desk.py stream`. */
 const openStreams = {};
+// How well each area fits the current mode (higher = shown first). Deep work = SUPR first; free time = side projects first.
+const FIT = {
+  plan:     { work: 3, builds: 1, life: 1 },
+  focus:    { work: 3, builds: 0, life: 0 },
+  low:      { life: 3, builds: 2, work: 1 },
+  shutdown: { work: 3, life: 2, builds: 1 },
+  reset:    { builds: 2, life: 2, work: 1 },
+  free:     { builds: 3, life: 2, work: 0 },
+  sleep:    { life: 1, builds: 1, work: 0 },
+};
+const FOR_MODE = { plan: "SUPR first", focus: "SUPR first, everything else waits", low: "Easy life stuff first", shutdown: "Wrap up SUPR, then life", reset: "Side projects and life first", free: "Side projects first, SUPR after", sleep: "Nothing urgent" };
 const WHO = ["Agni", "Pani", "Harsh", "Rohan", "client", "brand team"];
 const sideRank = it => { const r = parseInt(it.rank, 10); return r > 0 ? r : 99; };
 function streams() {
@@ -594,13 +605,17 @@ function streams() {
     const hrs = (Date.now() - last) / 36e5;
     g.active = !!(streamState[g.key] && streamState[g.key].active);
     g.last = last;
+    g.rank = Math.min(...g.cards.map(sideRank));
     g.done = all.filter(it => it.status === "done" && Date.parse(it.doneAt || "") > mon).length;
     g.ago = !last ? "" : hrs < 1 ? "just now" : hrs < 24 ? `${Math.round(hrs)}h ago` : `${Math.round(hrs / 24)}d ago`;
     g.next = g.cards[0];
     g.due = g.cards.map(it => it.due).filter(Boolean).sort()[0] || "";
     g.who = WHO.find(w => g.cards.some(it => (it.title + " " + (it.notes || "")).toLowerCase().includes(w.toLowerCase()))) || "";
     return g;
-  }).sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || (a.active ? b.last - a.last : a.order - b.order) || a.name.localeCompare(b.name));
+  }).sort((a, b) => {
+    const fit = FIT[currentMode()] || FIT.free;
+    return (fit[b.zone] ?? 0) - (fit[a.zone] ?? 0) || (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.rank - b.rank || b.last - a.last || a.name.localeCompare(b.name);
+  });
 }
 function viewNow() {
   const ss = streams();
@@ -617,9 +632,7 @@ function viewNow() {
       <div class="sf"><span>${g.cards.length} open</span>${g.done ? `<span>${g.done} done this week</span>` : ""}${g.who ? `<span>with ${esc(g.who)}</span>` : ""}${g.due ? `<span class="${g.due < dayKey() ? "late" : ""}">due ${fmtDue(g.due).toLowerCase()}</span>` : ""}<span class="ago">${g.ago}</span></div>
     </section>`;
   };
-  const on = ss.filter(g => g.active), off = ss.filter(g => !g.active);
-  return (on.length ? `<div class="streams">${on.map(tile).join("")}</div>` : `<div class="empty" style="margin-bottom:20px">Nothing marked active. Tap a switch to show what you're working on.</div>`) +
-    (off.length ? `<div class="ph" style="margin-top:22px"><h3>Inactive</h3><span class="n">${off.length}</span></div><div class="streams">${off.map(tile).join("")}</div>` : "");
+  return `<div class="streams">${ss.map(tile).join("")}</div>`;
 }
 
 /* auto-arrange: tiles pack into columns with no gaps (grid rows of 4px, each tile spans its height),
