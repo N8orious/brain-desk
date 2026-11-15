@@ -33,7 +33,8 @@ const MODES = [
 ];
 const PRIORITY = ["reset", "plan", "focus", "shutdown", "free", "sleep"];
 const DATA = { owner: "N8orious", repo: "brain-desk-data", path: "items.json", branch: "main" };
-const POLL_MS = 30000;
+const POLL_MS = 15000;
+const APP_VERSION = (document.querySelector('script[src*="app.js"]')?.getAttribute("src").split("v=")[1]) || "";
 const STALE_DAYS = 14;
 const FOCUS_MIN = 25;
 
@@ -238,13 +239,28 @@ function commitMsg(ops) {
   const verb = op.t === "create" ? "add" : op.t === "delete" ? "delete" : op.patch.status === "done" ? "done" : op.patch.status === "dropped" ? "drop" : op.patch.today === true ? "today" : "edit";
   return `desk: ${verb} ${t}`.slice(0, 72) + (ops.length > 1 ? ` (+${ops.length - 1})` : "");
 }
-async function poll() {
-  if (!gh.token || flushing || queue.length || document.visibilityState === "hidden") return;
+async function poll(force) {
+  if (!gh.token || flushing || queue.length || (!force && document.visibilityState === "hidden")) return;
   try {
-    const f = await readFile(true);
+    const f = await readFile(!force);
     if (f && !queue.length) { fileSha = f.sha; items = toList(f.data); habits = f.data.habits || {}; cacheLocal(); if (!drag || !drag.started) render(); }
     loaded = true; if (syncState === "error") setSync("saved");
   } catch (e) { if (e.status === 401 || e.status === 403 || e.status === 404) { setSync("auth"); render(); } else setSync("error"); }
+}
+// Refresh button / pull down: fetch the newest cards now, and reload if a newer version of the app is live.
+let refreshing = false;
+async function refreshNow() {
+  if (refreshing) return; refreshing = true;
+  const b = $("#refreshBtn"); if (b) b.classList.add("spin");
+  try {
+    if (queue.length) await flush();
+    await poll(true); render();
+    const r = await fetch("index.html?t=" + Date.now(), { cache: "no-store" });
+    const m = r.ok && (await r.text()).match(/app\.js\?v=([\w.-]+)/);
+    if (m && APP_VERSION && m[1] !== APP_VERSION) { toast("New version. Reloading…"); setTimeout(() => location.reload(), 600); return; }
+    toast(syncState === "error" ? "Couldn't reach GitHub. Showing the last copy." : "Up to date.");
+  } catch (e) { toast("Couldn't refresh. Check your connection."); }
+  finally { refreshing = false; const b2 = $("#refreshBtn"); if (b2) b2.classList.remove("spin"); }
 }
 function cacheLocal() { store("cache", items); store("hcache", habits); }
 function setSync(s) { syncState = s; const el = $("#sync"); if (el) { el.dataset.s = s; el.title = { idle: "", saving: "Saving to GitHub…", saved: "Saved to GitHub", error: "Offline. Changes will sync when you're back.", auth: "GitHub access needs fixing" }[s] || ""; } }
@@ -313,14 +329,14 @@ function renderBar(mode) {
       <span class="mi">${ico(m.icon, 17)}</span><span class="nm">${m.name}</span>${override ? `<span class="live" title="Turned on by hand"></span>` : ""}<span class="chev">${ico("chev", 14)}</span></button>
     <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", t ? t + "/3" : "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
     <div class="bar-r"><span class="clock" id="clk">${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>
-      <button class="iconbtn glass" data-act="view" data-v="settings" aria-label="GitHub sync"><span class="sync" id="sync" data-s="${syncState}"></span></button>
+      <button class="iconbtn glass refresh" id="refreshBtn" data-act="refresh" aria-label="Refresh">${ico("refresh", 20)}<span class="sync" id="sync" data-s="${syncState}"></span></button>
       <button class="addbtn" data-act="dump" aria-label="Dump a thought (N)">${ico("plus", 22)}</button></div>`;
 }
 function renderModes(mode) {
   const w = weekStats(), max = Math.max(1, ...w.counts);
   $("#modes").innerHTML = `<div class="ph2">Modes · ${override ? "turned on by hand" : "switching on schedule"}</div>` +
     MODES.map(m => `<button class="mrow" data-act="mode" data-m="${m.id}" aria-current="${m.id === mode}" style="--ic:${m.tint}"><span class="mi">${ico(m.icon, 18)}</span><span class="nm">${m.name}</span><span class="wh">${whenLabel(m)}</span>${m.id === mode ? `<span class="ck">${ico("tick", 18)}</span>` : ""}</button>`).join("") +
-    `<div class="popfoot"><div class="bars" aria-hidden="true">${w.counts.map((c, i) => `<i class="${c ? "on" : ""} ${i === w.dow ? "cur" : ""}" style="height:${4 + Math.round(c / max * 18)}px"></i>`).join("")}</div><span>${w.total} done this week</span>${override ? `<button data-act="auto">Back to schedule</button>` : ""}</div>`;
+    `<div class="popfoot"><div class="bars" aria-hidden="true">${w.counts.map((c, i) => `<i class="${c ? "on" : ""} ${i === w.dow ? "cur" : ""}" style="height:${4 + Math.round(c / max * 18)}px"></i>`).join("")}</div><span>${w.total} done this week</span>${override ? `<button data-act="auto">Back to schedule</button>` : `<button data-act="view" data-v="settings">GitHub sync</button>`}</div>`;
 }
 function openModes() { $("#modes").classList.add("open"); }
 function closeModes() { $("#modes").classList.remove("open"); }
@@ -679,7 +695,8 @@ document.addEventListener("click", e => {
   if (!el) return;
   const a = el.dataset.act, id = el.dataset.id;
   switch (a) {
-    case "view": view = el.dataset.v; store("view", view); $("#scroll").scrollTop = 0; render(); break;
+    case "view": closeModes(); view = el.dataset.v; store("view", view); $("#scroll").scrollTop = 0; render(); break;
+    case "refresh": refreshNow(); break;
     case "modes": $("#modes").classList.contains("open") ? closeModes() : openModes(); break;
     case "mode": closeModes(); setMode(el.dataset.m); break;
     case "auto": closeModes(); override = null; store("override", null); view = "now"; render(); break;
@@ -744,6 +761,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "1") { view = "now"; store("view", view); render(); }
   if (e.key === "2") { view = "board"; store("view", view); render(); }
   if (e.key === "3") { view = "done"; store("view", view); render(); }
+  if (e.key === "r" || e.key === "R") { e.preventDefault(); refreshNow(); }
   if (e.key === "m" || e.key === "M") { e.preventDefault(); $("#modes").classList.contains("open") ? closeModes() : openModes(); }
 });
 
@@ -831,6 +849,16 @@ render();
 items = recall("cache", []); habits = recall("hcache", {}); loaded = items.length > 0; render();
 if (gh.token) { poll().then(render); }
 setInterval(poll, POLL_MS);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") poll(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") poll(true).then(render); });
+window.addEventListener("pageshow", () => poll(true).then(render));   // home-screen app coming back from the background
+window.addEventListener("focus", () => poll(true).then(render));
+/* pull down from the top to refresh */
+(() => {
+  const sc = $("#scroll"), pull = document.createElement("div"); pull.className = "pull"; pull.innerHTML = ico("refresh", 20); document.body.appendChild(pull);
+  let y0 = null, dy = 0;
+  sc.addEventListener("touchstart", e => { y0 = sc.scrollTop <= 0 && e.touches.length === 1 ? e.touches[0].clientY : null; dy = 0; }, { passive: true });
+  sc.addEventListener("touchmove", e => { if (y0 === null) return; dy = Math.max(0, e.touches[0].clientY - y0); pull.style.opacity = Math.min(1, dy / 90); pull.style.transform = `translate(-50%, ${Math.min(dy, 110) * .6}px) rotate(${dy * 2}deg)`; }, { passive: true });
+  sc.addEventListener("touchend", () => { if (y0 !== null && dy > 90) refreshNow(); y0 = null; pull.style.opacity = 0; pull.style.transform = ""; });
+})();
 window.addEventListener("online", () => { flush(); poll(); });
 })();
