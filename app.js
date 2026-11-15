@@ -82,7 +82,7 @@ function statusIcon(it) {
 }
 
 /* ============================ STATE ============================ */
-let items = [], loaded = false;
+let items = [], habits = {}, loaded = false;
 let view = recall("view", "now");
 let gh = { owner: recall("owner", DATA.owner), repo: recall("repo", DATA.repo), token: recall("token", "") };
 let override = recall("override", null);
@@ -107,8 +107,24 @@ function currentMode() {
 }
 function setMode(id) {
   if (id === scheduled()) override = null;
-  else override = { id, until: nextChange() };
+  else override = { id, until: nextChange(), start: Date.now() };
   store("override", override); view = "now"; store("view", view); render();
+}
+function blockRange() {
+  const now = Date.now(), m = currentMode();
+  if (override && override.until > now) return { mode: m, start: override.start || now, end: override.until };
+  const s = scheduled(); let start = now;
+  for (let i = 1; i <= 24 * 12; i++) { const t = new Date(now - i * 300000); if (scheduled(t) !== s) { start = now - (i - 1) * 300000; break; } }
+  return { mode: m, start, end: nextChange() };
+}
+function fmtDur(ms) { const mi = Math.max(0, Math.round(ms / 60000)), h = Math.floor(mi / 60), r = mi % 60; return h ? `${h}h ${r ? r + "m" : ""}`.trim() : `${r}m`; }
+function updateTimeLeft() {
+  const el = $("#tleft"); if (!el) return;
+  const b = blockRange(), left = b.end - Date.now(), pct = Math.max(0, Math.min(100, left / Math.max(1, b.end - b.start) * 100));
+  const next = MODE[scheduled(new Date(b.end + 60000))];
+  $("#tlFill").style.width = pct + "%";
+  $("#tlLabel").innerHTML = `<b>${fmtDur(left)}</b> left in ${esc(MODE[b.mode].name)}`;
+  $("#tlNext").textContent = `then ${next.name} at ${new Date(b.end).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}`;
 }
 function whenLabel(m) {
   if (!m.when.length) return "By hand";
@@ -173,9 +189,12 @@ async function readFile(useEtag) {
   return { data: JSON.parse(dec(j.content) || "{}"), sha: j.sha };
 }
 function applyOps(data, ops) {
-  data.items = data.items || {};
+  data.items = data.items || {}; data.habits = data.habits || {};
   ops.forEach(op => {
-    if (op.t === "create") data.items[op.id] = op.doc;
+    if (op.t === "hset") data.habits[op.id] = Object.assign(data.habits[op.id] || {}, op.doc);
+    else if (op.t === "hdel") delete data.habits[op.id];
+    else if (op.t === "htick") { const h = data.habits[op.id]; if (h) { h.days = h.days || {}; if (op.val) h.days[op.date] = true; else delete h.days[op.date]; } }
+    else if (op.t === "create") data.items[op.id] = op.doc;
     else if (op.t === "delete") delete data.items[op.id];
     else if (op.t === "patch" && data.items[op.id]) {
       const d = data.items[op.id];
@@ -199,7 +218,7 @@ async function flush() {
       if (r.ok) {
         const j = await r.json(); fileSha = j.content.sha; etag = null;
         queue = queue.slice(ops.length);
-        if (!queue.length) { items = toList(data); cacheLocal(); render(); }
+        if (!queue.length) { items = toList(data); habits = data.habits || {}; cacheLocal(); render(); }
         setSync("saved"); break;
       }
       if (r.status !== 409 && r.status !== 422) throw new Error("GitHub " + r.status);
@@ -211,7 +230,9 @@ async function flush() {
   if (queue.length) flush();
 }
 function commitMsg(ops) {
-  const op = ops[0], t = op.t === "create" ? op.doc.title : (items.find(i => i.id === op.id) || {}).title || op.id;
+  const op = ops[0];
+  if (op.t[0] === "h") return `desk: habit ${op.t === "htick" ? (op.val ? "tick" : "untick") : op.t === "hdel" ? "remove" : "edit"} ${(habits[op.id] || op.doc || {}).title || op.id}`.slice(0, 72);
+  const t = op.t === "create" ? op.doc.title : (items.find(i => i.id === op.id) || {}).title || op.id;
   const verb = op.t === "create" ? "add" : op.t === "delete" ? "delete" : op.patch.status === "done" ? "done" : op.patch.status === "dropped" ? "drop" : op.patch.today === true ? "today" : "edit";
   return `desk: ${verb} ${t}`.slice(0, 72) + (ops.length > 1 ? ` (+${ops.length - 1})` : "");
 }
@@ -219,11 +240,11 @@ async function poll() {
   if (!gh.token || flushing || queue.length || document.visibilityState === "hidden") return;
   try {
     const f = await readFile(true);
-    if (f && !queue.length) { fileSha = f.sha; items = toList(f.data); cacheLocal(); if (!drag || !drag.started) render(); }
+    if (f && !queue.length) { fileSha = f.sha; items = toList(f.data); habits = f.data.habits || {}; cacheLocal(); if (!drag || !drag.started) render(); }
     loaded = true; if (syncState === "error") setSync("saved");
   } catch (e) { if (e.status === 401 || e.status === 403 || e.status === 404) { setSync("auth"); render(); } else setSync("error"); }
 }
-function cacheLocal() { store("cache", items); }
+function cacheLocal() { store("cache", items); store("hcache", habits); }
 function setSync(s) { syncState = s; const el = $("#sync"); if (el) { el.dataset.s = s; el.title = { idle: "", saving: "Saving to GitHub…", saved: "Saved to GitHub", error: "Offline. Changes will sync when you're back.", auth: "GitHub access needs fixing" }[s] || ""; } }
 
 /* ============================ WRITES ============================ */
@@ -256,7 +277,14 @@ function dropIt(id) {
   toast("Let go.", () => { save(id, b); rerank(); });
 }
 function keepIt(id) { save(id, { touchedAt: nowIso(), todayDate: dayKey() }); toast("Kept."); }
+// ADHD rule: nothing goes on today without a first step small enough to start in 2 minutes.
 function addToday(id, date = dayKey()) {
+  const it = items.find(i => i.id === id); if (!it || it.today) return;
+  if (todays().length >= 3) { toast("Three is the limit. Finish or remove one first."); return; }
+  if (!stepsLeft(it).length) { openStep(id, date); return; }
+  addTodayNow(id, date);
+}
+function addTodayNow(id, date = dayKey()) {
   const it = items.find(i => i.id === id); if (!it || it.today) return;
   const t = todays(); if (t.length >= 3) { toast("Three is the limit. Finish or remove one first."); return; }
   save(id, { today: true, todayRank: t.length + 1, todayDate: date, touchedAt: nowIso() });
@@ -265,14 +293,14 @@ function removeToday(id) { save(id, { today: false, todayRank: null }); rerank()
 function closeDay() {
   const tm = addDays(1);
   todays().forEach(it => save(it.id, { todayDate: tm }));
-  override = { id: "free", until: nextChange() }; store("override", override);
+  override = { id: "free", until: nextChange(), start: Date.now() }; store("override", override);
   toast("Day closed. See you tomorrow."); render();
 }
 
 /* ============================ RENDER: SHELL ============================ */
 function render() {
   const mode = currentMode();
-  renderSide(mode); renderTop(mode); renderBody(mode);
+  renderSide(mode); renderTop(mode); renderBodyWrap(mode);
   if (peekId) fillPeek(false);
 }
 function renderSide(mode) {
@@ -302,9 +330,11 @@ function renderTop(mode) {
   const tint = view === "now" ? m.tint : "var(--text-2)";
   const ov = override && view === "now" ? `<span class="override">On until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>` : "";
   $("#top").innerHTML = `<div class="modechip" style="--tint:${tint}"><span class="mi">${ico(icon, 18)}</span><div style="min-width:0"><h1>${title}</h1><p>${esc(line)}</p></div></div>
-    <span class="sp"></span>${ov}
+    <span class="sp"></span>
+    <div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>
     <div class="clock"><b id="clk">${d.toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</b><span>${d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "short" })}</span></div>`;
 }
+function renderBodyWrap(mode) { renderBody(mode); updateTimeLeft(); }
 function renderBody(mode) {
   const b = $("#body"); const y = b.scrollTop;
   let h = loaded || items.length ? "" : `<div class="status">Loading your desk…</div>`;
@@ -356,11 +386,87 @@ function slots(opts = {}) {
     if (!it) { h += `<div class="slot empty-slot"><span class="rk">${i + 1}</span><h4>${opts.emptyText || "Open slot. Add one from the right."}</h4><span></span></div>`; continue; }
     const nx = stepsLeft(it)[0];
     h += `<div class="slot" data-act="peek" data-id="${esc(it.id)}"><span class="rk">${i + 1}</span>
-      <div style="min-width:0"><h4>${esc(it.title)}</h4><div class="sub">${esc(it.project || zoneOf(it).name)}${nx ? " · next: " + esc(nx.t) : ""}</div>
+      <div style="min-width:0"><h4>${esc(it.title)}</h4><div class="sub">${esc(it.project || zoneOf(it).name)}${nx ? " · next: " + esc(nx.t) : ""}</div>${nx ? "" : `<button class="linkbtn" data-act="firststep" data-id="${esc(it.id)}">${ico("plus", 13)}Add a 2-minute first step</button>`}
       ${carried(it) && opts.askCarried !== false ? `<div class="ask"><span class="dim" style="font-size:12px;align-self:center">From ${it.todayDate === addDays(-1) ? "yesterday" : "earlier"}.</span>${A.done(it)}<button class="btn sm" data-act="keep" data-id="${esc(it.id)}">Still on it</button>${A.dropTxt(it)}</div>` : ""}</div>
       <div class="ra">${opts.slotActions ? opts.slotActions(it) : `<button class="btn sm icon" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done" title="Done">${ico("check", 15)}</button>${A.untoday(it)}`}</div></div>`;
   }
   return h + `</div>`;
+}
+
+/* ============================ HABITS ============================
+   Habits aren't tasks: they never get "done", so they live in a daily tick row, not on the board. */
+const habitList = () => Object.entries(habits).map(([id, h]) => Object.assign({ id }, h)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+function streak(h) {
+  let n = 0;
+  for (let i = 0; i < 400; i++) { const on = h.days && h.days[addDays(-i)]; if (on) n++; else if (i > 0) break; }
+  return n;
+}
+function habitsPanel() {
+  const list = habitList(), k = dayKey();
+  const doneN = list.filter(h => h.days && h.days[k]).length;
+  const chip = h => {
+    const on = !!(h.days && h.days[k]), st = streak(h);
+    const dots = [6, 5, 4, 3, 2, 1, 0].map(i => `<i class="${h.days && h.days[addDays(-i)] ? "on" : ""} ${i === 0 ? "td" : ""}"></i>`).join("");
+    return `<button class="habit ${on ? "on" : ""}" data-act="habit" data-id="${esc(h.id)}" aria-pressed="${on}"><span class="hc">${on ? ico("check", 14).replace('<circle cx="12" cy="12" r="8.5"/>', "") : ""}</span><span class="hn">${esc(h.title)}</span><span class="hd" aria-hidden="true">${dots}</span>${st > 1 ? `<span class="hs">${st}d</span>` : ""}</button>`;
+  };
+  return `<section class="panel" style="margin-bottom:18px"><div class="ph"><h3>Habits</h3><span class="n">${doneN}/${list.length} today</span><button class="btn sm ghost act" data-act="habitedit">${list.length ? "Edit" : ico("plus", 14) + "Add"}</button></div>
+    ${list.length ? `<div class="hrow">${list.map(chip).join("")}</div>` : `<div class="empty">No habits yet. Add the few things you want to do most days.</div>`}</section>`;
+}
+function toggleHabit(id) {
+  const h = habits[id]; if (!h) return; const k = dayKey(), val = !(h.days && h.days[k]);
+  h.days = h.days || {}; if (val) h.days[k] = true; else delete h.days[k];
+  cacheLocal(); render(); enqueue({ t: "htick", id, date: k, val });
+  if (val) toast(streak(h) > 1 ? `${h.title}: ${streak(h)} days in a row.` : `${h.title}: ticked.`);
+}
+function openHabitEdit() {
+  const list = habitList();
+  $("#habitRows").innerHTML = list.map(h => `<div class="hedit" data-id="${esc(h.id)}"><input class="field" value="${esc(h.title)}" aria-label="Habit name"><button class="btn sm icon bad" data-act="hrm" aria-label="Remove habit">${ico("x", 14)}</button></div>`).join("");
+  $("#habitModal").classList.add("open");
+}
+function addHabitRow() { $("#habitRows").insertAdjacentHTML("beforeend", `<div class="hedit" data-id=""><input class="field" placeholder="New habit, e.g. 20 min walk" aria-label="Habit name"><button class="btn sm icon bad" data-act="hrm" aria-label="Remove habit">${ico("x", 14)}</button></div>`); $("#habitRows").lastElementChild.querySelector("input").focus(); }
+function saveHabits() {
+  const rows = [...document.querySelectorAll("#habitRows .hedit")], keep = new Set();
+  rows.forEach((r, i) => {
+    const title = r.querySelector("input").value.trim(); let id = r.dataset.id;
+    if (!title) return;
+    if (!id) { id = "h" + Date.now().toString(36) + i; habits[id] = { title, order: i, days: {}, createdAt: nowIso() }; enqueue({ t: "hset", id, doc: habits[id] }); }
+    else if (habits[id].title !== title || habits[id].order !== i) { habits[id].title = title; habits[id].order = i; enqueue({ t: "hset", id, doc: { title, order: i } }); }
+    keep.add(id);
+  });
+  Object.keys(habits).forEach(id => { if (!keep.has(id)) { delete habits[id]; enqueue({ t: "hdel", id }); } });
+  cacheLocal(); closeModal("#habitModal"); render();
+}
+
+/* ============================ FIRST STEP ============================ */
+let stepFor = null;
+function stepIdeas(it) {
+  const t = (it.title || "").toLowerCase(), out = [];
+  if (/order|buy|shop|amazon|ikea/.test(t)) out.push("Open the app and add one thing to the cart");
+  if (/fix|repair|window|plumb|service/.test(t)) out.push("Find one number to call and save it");
+  if (/plan|decide|theme|strategy|scope/.test(t)) out.push("Open a blank note and write 3 bullets");
+  if (/design|wireframe|screen|flow|app|ui/.test(t)) out.push("Open the file and duplicate the last frame");
+  if (/call|email|message|agni|client|team|loop in/.test(t)) out.push("Write just the first line of the message");
+  if (/clothes|clean|sort|bedsheet|room|desk/.test(t)) out.push("Set a 2-min timer and do one small corner");
+  if (/print|3d|a1/.test(t)) out.push("Open the model in Bambu Studio");
+  if (/build|code|game|claude code|esp/.test(t)) out.push("Open the project and run it once");
+  out.push("Open it and look at it for 2 minutes");
+  return [...new Set(out)].slice(0, 3);
+}
+function openStep(id, date) {
+  const it = items.find(i => i.id === id); if (!it) return;
+  stepFor = { id, date };
+  $("#stepCard").textContent = it.title;
+  $("#stepIn2").value = "";
+  $("#stepIdeas").innerHTML = stepIdeas(it).map(s => `<button type="button" class="btn sm" data-act="stepidea">${esc(s)}</button>`).join("");
+  $("#stepGo").textContent = date ? (date === dayKey() ? "Add to today" : "Add to tomorrow") : "Save step";
+  $("#stepModal").classList.add("open"); setTimeout(() => $("#stepIn2").focus(), 30);
+}
+function saveStep() {
+  const v = $("#stepIn2").value.trim(); if (!v || !stepFor) { $("#stepIn2").focus(); return; }
+  const it = items.find(i => i.id === stepFor.id); if (!it) return;
+  save(it.id, { steps: [...(it.steps || []).map(s => ({ ...s })), { t: v, done: false }], touchedAt: nowIso() });
+  if (stepFor.date) addTodayNow(it.id, stepFor.date);
+  stepFor = null; closeModal("#stepModal");
 }
 
 /* ============================ VIEWS: MODES ============================ */
@@ -371,7 +477,7 @@ function vPlan() {
   const right = panel("Suggested", "", list(sug, it => row(it, A.today(it)), "Nothing waiting. Nice.")) +
     `<div style="height:18px"></div>` +
     panel("Brain dump", dump.length, list(dump.slice(0, 6), it => row(it, A.today(it) + A.drop(it)), "Empty. Press N whenever something pops up."));
-  return `<div class="grid g2">${left}<div>${right}</div></div>`;
+  return habitsPanel() + `<div class="grid g2">${left}<div>${right}</div></div>`;
 }
 function vFocus() {
   const t = todays();
@@ -394,7 +500,7 @@ function vFocus() {
 }
 function vLow() {
   const easy = openItems().filter(isEasy).sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0)).slice(0, 12);
-  return `<div class="grid g2">${panel("Easy wins", easy.length, list(easy, it => row(it, (it.today ? "" : A.today(it)) + A.drop(it)), "No small tasks tagged. Open a card and set Size to 15 min or Energy to Low."))}
+  return habitsPanel() + `<div class="grid g2">${panel("Easy wins", easy.length, list(easy, it => row(it, (it.today ? "" : A.today(it)) + A.drop(it)), "No small tasks tagged. Open a card and set Size to 15 min or Energy to Low."))}
     <div>${panel("Today's three", todays().length + "/3", slots({ askCarried: false }))}<div class="note">${ico("battery", 14)}Low energy is normal. One small thing done beats a big thing stared at.</div></div></div>`;
 }
 function vShutdown() {
@@ -409,13 +515,13 @@ function vShutdown() {
   const c3 = panel("Set tomorrow", "", `${slots({ emptyText: "Open slot", askCarried: false, slotActions: it => A.untoday(it) })}
       ${fill > 0 ? `<div class="sect" style="padding:0 10px">Fill ${fill} more</div>` + list(suggestions(4), it => row(it, A.tomorrow(it)), "") : ""}
       <div style="padding:10px"><button class="btn primary lg" style="width:100%" data-act="closeday">${ico("moon", 15)}Close the day</button></div>`, `<span class="step act">3</span>`);
-  return `<div class="grid g3">${c1}${c2}${c3}</div>`;
+  return habitsPanel() + `<div class="grid g3">${c1}${c2}${c3}</div>`;
 }
 function vFree() {
   const workN = inZone("work").length;
   const b = inZone("builds"), l = inZone("life");
   const pick = [...b, ...l].filter(i => i.energy !== "high").slice(0, 1)[0] || b[0];
-  return `${pick ? `<section class="panel" style="margin-bottom:18px"><div class="ph"><h3>If you feel like it</h3><span class="n">no pressure</span></div><div class="pb">${row(pick)}</div></section>` : ""}
+  return habitsPanel() + `${pick ? `<section class="panel" style="margin-bottom:18px"><div class="ph"><h3>If you feel like it</h3><span class="n">no pressure</span></div><div class="pb">${row(pick)}</div></section>` : ""}
     <div class="grid g22">${panel("Builds", b.length, list(b, it => row(it, A.drop(it)), "No builds on the desk."))}${panel("Life", l.length, list(l, it => row(it, A.drop(it)), "Nothing here."))}</div>
     <div class="note">${ico("x", 14)}Work is closed. ${workN} work card${workN === 1 ? "" : "s"} will be there tomorrow.</div>`;
 }
@@ -436,6 +542,7 @@ function vSleep() {
   return `<div class="sleep"><span class="moon">${ico("moon", 26)}</span><h2>${t.length ? "Tomorrow is set." : "Nothing set for tomorrow. That's fine."}</h2>
     <p class="muted" style="margin:0">You can stop thinking about it now. It's all on the desk.</p>
     ${t.length ? panel("Tomorrow's three", "", t.map(it => row(it)).join("")) : ""}
+    ${habitList().length ? `<div style="width:100%;text-align:left">${habitsPanel()}</div>` : ""}
     <button class="btn lg" data-act="dump">${ico("dump", 15)}Mind racing? Dump it here</button></div>`;
 }
 
@@ -591,6 +698,16 @@ document.addEventListener("click", e => {
     case "timer": toggleTimer(); break;
     case "plus5": timer.left += 300; timer.total += 300; drawTimer(); break;
     case "closeday": closeDay(); break;
+    case "habit": toggleHabit(id); break;
+    case "habitedit": openHabitEdit(); break;
+    case "hadd": addHabitRow(); break;
+    case "hrm": el.closest(".hedit").remove(); break;
+    case "hsave": saveHabits(); break;
+    case "hcancel": closeModal("#habitModal"); break;
+    case "firststep": openStep(id, null); break;
+    case "stepidea": $("#stepIn2").value = el.textContent; $("#stepIn2").focus(); break;
+    case "stepgo": saveStep(); break;
+    case "stepcancel": stepFor = null; closeModal("#stepModal"); break;
     case "connect": {
       gh = { owner: $("#ghOwner").value.trim(), repo: $("#ghRepo").value.trim(), token: $("#ghToken").value.trim() };
       store("owner", gh.owner); store("repo", gh.repo); store("token", gh.token);
@@ -612,10 +729,11 @@ $("#scrim").addEventListener("click", closePeek);
 ["#pkTitle", "#pkNotes", "#pkProj"].forEach(s => $(s).addEventListener("input", () => { clearTimeout(pkT); pkT = setTimeout(() => { pkT = null; commitPeek(); }, 700); }));
 $("#pkDue").addEventListener("change", () => save(peekId, { due: $("#pkDue").value || "", touchedAt: nowIso() }));
 $("#stepForm").addEventListener("submit", e => { e.preventDefault(); const v = $("#stepIn").value.trim(); if (!v) return; const it = items.find(i => i.id === peekId); save(peekId, { steps: [...(it.steps || []).map(s => ({ ...s })), { t: v, done: false }], touchedAt: nowIso() }); $("#stepIn").value = ""; });
+$("#stepIn2").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); saveStep(); } });
 $("#dumpTxt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveDump(); } });
 document.addEventListener("keydown", e => {
   const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
-  if (e.key === "Escape") { if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
+  if (e.key === "Escape") { if ($("#stepModal").classList.contains("open")) { closeModal("#stepModal"); return; } if ($("#habitModal").classList.contains("open")) { closeModal("#habitModal"); return; } if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "n" || e.key === "N") { e.preventDefault(); openDump(); }
   if (e.key === "1") { view = "now"; store("view", view); render(); }
@@ -664,10 +782,11 @@ document.addEventListener("touchmove", e => { if (drag && drag.started) e.preven
 let lastMode = currentMode();
 setInterval(() => {
   const c = $("#clk"); if (c) c.textContent = new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" });
+  updateTimeLeft();
   const m = currentMode(); if (m !== lastMode) { lastMode = m; render(); }
 }, 15000);
 render();
-items = recall("cache", []); loaded = items.length > 0; render();
+items = recall("cache", []); habits = recall("hcache", {}); loaded = items.length > 0; render();
 if (gh.token) { poll().then(render); }
 setInterval(poll, POLL_MS);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") poll(); });

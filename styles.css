@@ -286,3 +286,29 @@ textarea.field{height:auto;padding:9px 10px;resize:vertical;line-height:1.5}
 .sync[data-s="saving"]{background:var(--warn);animation:pulse 1s ease-in-out infinite}
 .sync[data-s="error"],.sync[data-s="auth"]{background:var(--bad)}
 @keyframes pulse{50%{opacity:.35}}
+
+/* time left */
+.tleft{display:flex;flex-direction:column;gap:5px;width:280px;min-width:0;flex:none}
+.tl-txt{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-2);white-space:nowrap;overflow:hidden}
+#tlNext{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tl-txt b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.tl-track{height:5px;border-radius:5px;background:var(--line);overflow:hidden}
+.tl-track i{display:block;height:100%;background:var(--tint);border-radius:5px;transition:width .6s ease}
+@media (max-width:1060px){.tleft{width:190px}.tl-txt .dim{display:none}}
+@media (max-width:620px){.tleft{display:none}}
+
+/* habits */
+.hrow{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;padding:10px}
+.habit{display:flex;align-items:center;gap:10px;min-height:48px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--raise);text-align:left}
+.habit:hover{border-color:color-mix(in srgb,var(--text-3) 45%,var(--line))}
+.habit .hc{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--text-3);display:grid;place-items:center;flex:none;color:var(--accent-ink)}
+.habit.on .hc{background:var(--good);border-color:var(--good)}
+.habit .hn{flex:1;min-width:0;font-weight:500;line-height:1.3}
+.habit.on .hn{color:var(--text-2)}
+.habit .hd{display:flex;gap:3px;flex:none}
+.habit .hd i{width:6px;height:6px;border-radius:2px;background:var(--line)}
+.habit .hd i.on{background:var(--good)}
+.habit .hd i.td{outline:1px solid var(--text-3);outline-offset:1px}
+.habit .hs{font-family:var(--mono);font-size:11px;color:var(--good);flex:none}
+.hedit{display:flex;gap:6px}
+.linkbtn{display:inline-flex;align-items:center;gap:5px;margin-top:8px;font-size:12.5px;font-weight:500;color:var(--accent)}
