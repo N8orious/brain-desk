@@ -229,7 +229,7 @@ async function flush() {
       await new Promise(res => setTimeout(res, 300 + Math.random() * 600));
       if (attempt === 3) throw new Error("conflict");
     }
-  } catch (e) { console.warn(e); setSync("error"); toast("Couldn't save to GitHub. Will retry."); setTimeout(flush, 15000); }
+  } catch (e) { console.warn(e); setSync("error"); toast("Couldn't save to GitHub. Will retry."); flushing = false; clearTimeout(flushT); flushT = setTimeout(flush, 15000); return; }
   flushing = false;
   if (queue.length) flush();
 }
@@ -348,7 +348,7 @@ function renderTop(mode) {
   const date = d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long" });
   if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>GitHub sync</h1><p class="line">Where your desk is saved.</p></div>`; return; }
   const title = view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "Board" : "Done";
-  const line = view === "now" ? `${m.name}: ${FOR_MODE[mode] || ""}. Tap a switch to mark what's active.` : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
+  const line = view === "now" ? `${m.name}: ${FOR_MODE[mode] || ""}. Tap a card to mark it active.` : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
   const ov = override && view === "today" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
   $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>${title}</h1><p class="line">${esc(line)}</p>${ov}</div>
     ${view === "today" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
@@ -604,6 +604,7 @@ function streams() {
     const last = Math.max(...all.map(it => Date.parse(it.doneAt || "") || 0), ...g.cards.map(it => Date.parse(touched(it) || "") || 0));
     const hrs = (Date.now() - last) / 36e5;
     g.active = !!(streamState[g.key] && streamState[g.key].active);
+    g.on = Date.parse((streamState[g.key] || {}).at || "") || 0;
     g.last = last;
     g.rank = Math.min(...g.cards.map(sideRank));
     g.done = all.filter(it => it.status === "done" && Date.parse(it.doneAt || "") > mon).length;
@@ -614,7 +615,9 @@ function streams() {
     return g;
   }).sort((a, b) => {
     const fit = FIT[currentMode()] || FIT.free;
-    return (fit[b.zone] ?? 0) - (fit[a.zone] ?? 0) || (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.rank - b.rank || b.last - a.last || a.name.localeCompare(b.name);
+    if (a.active !== b.active) return a.active ? -1 : 1;                 // tapped-on cards always lead
+    if (a.active) return b.on - a.on;                                     // the one you tapped last is #1
+    return (fit[b.zone] ?? 0) - (fit[a.zone] ?? 0) || a.rank - b.rank || b.last - a.last || a.name.localeCompare(b.name);
   });
 }
 function viewNow() {
@@ -623,9 +626,8 @@ function viewNow() {
   const tile = g => {
     const nx = g.next, step = nx ? stepsLeft(nx)[0] : null, more = g.cards.slice(1), showAll = openStreams[g.key];
     const zc = ZONE[g.zone] ? ZONE[g.zone].color : "var(--text-3)";
-    return `<section class="stream ${g.active ? "on" : "off"}" data-k="${esc(g.key)}" style="--zc:${zc}">
-      <div class="sh"><span class="zdot" style="--c:${zc}"></span><span class="sa">${esc(g.area)}</span>
-        <button class="switch" role="switch" aria-checked="${g.active}" data-act="streamtoggle" data-k="${esc(g.key)}" aria-label="${esc(g.name)} active"><span class="sl">${g.active ? "Active" : "Inactive"}</span><span class="tr"><i></i></span></button></div>
+    return `<section class="stream ${g.active ? "on" : "off"}" data-act="streamtoggle" data-k="${esc(g.key)}" role="button" tabindex="0" aria-pressed="${g.active}" aria-label="${esc(g.name)}: tap to mark ${g.active ? "inactive" : "active"}" style="--zc:${zc}">
+      <div class="sh"><span class="zdot" style="--c:${zc}"></span><span class="sa">${esc(g.area)}</span></div>
       <h3>${esc(g.name)}</h3>
       ${nx ? `<button class="snext" data-act="peek" data-id="${esc(nx.id)}"><span class="lb">${nx.today ? "On today" : "Next"}</span><span class="tx">${esc(step ? step.t : nx.title)}</span>${step ? `<span class="of">${esc(nx.title)}</span>` : ""}</button>` : ""}
       ${more.length ? `<div class="smore">${(showAll ? more : more.slice(0, 2)).map(it => `<button class="sitem" data-act="peek" data-id="${esc(it.id)}">${statusIcon(it).replace(/width="24" height="24"/, 'width="18" height="18"')}<span>${esc(it.title)}</span></button>`).join("")}${more.length > 2 ? `<button class="linkbtn" data-act="streammore" data-k="${esc(g.key)}">${showAll ? "Show less" : `+${more.length - 2} more`}</button>` : ""}</div>` : ""}

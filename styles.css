@@ -234,12 +234,11 @@ svg{display:block;flex:none}
 .stream.off{opacity:.6}
 .stream .sh{display:flex;align-items:center;gap:8px}
 .stream .sa{font-size:var(--t-foot);font-weight:600;color:var(--text-3);flex:1}
-.switch{display:flex;align-items:center;gap:10px;min-height:var(--hit);padding:0 0 0 8px;font-size:var(--t-foot);font-weight:600;color:var(--text-3)}
-.switch .tr{width:51px;height:31px;border-radius:999px;background:var(--line);position:relative;transition:background .2s;flex:none}
-.switch .tr i{position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2);transition:transform .2s}
-.switch[aria-checked="true"]{color:var(--good)}
-.switch[aria-checked="true"] .tr{background:var(--good)}
-.switch[aria-checked="true"] .tr i{transform:translateX(20px)}
+.stream{cursor:pointer;-webkit-user-select:none;user-select:none;transition:opacity .2s,box-shadow .2s,transform .12s}
+.stream:active{transform:scale(.985)}
+.stream.on{box-shadow:0 0 0 2.5px var(--zc),0 10px 30px -14px color-mix(in srgb,var(--zc) 60%,transparent)}
+.stream.off{opacity:.5}
+.stream.off h3{color:var(--text-2)}
 .stream h3{font-size:1.45rem;font-weight:700;letter-spacing:-.02em;line-height:1.15}
 .snext{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:12px 14px;border-radius:14px;background:var(--bg);min-height:var(--hit)}
 .snext .lb{font-size:var(--t-cap);font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
