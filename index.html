@@ -7,25 +7,23 @@
 <meta name="apple-mobile-web-app-title" content="Brain Desk">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#0D0E10" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#FBFBFC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-180.png">
 <link rel="manifest" href="manifest.json">
 <title>Brain Desk</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..650&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=ipad1">
 </head>
 <body>
 <div class="app">
-  <aside class="side" id="side" aria-label="Navigation"></aside>
-  <main class="main">
-    <header class="top" id="top"></header>
+  <header class="bar" id="bar"></header>
+  <main class="scroll" id="scroll">
+    <div class="hero" id="top"></div>
     <div class="body" id="body"></div>
   </main>
 </div>
+<div class="pop" id="modes" role="dialog" aria-label="Modes"></div>
 
 <div class="scrim" id="scrim"></div>
 <aside class="peek" id="peek" aria-label="Card details">
@@ -63,7 +61,7 @@
     <textarea id="dumpTxt" placeholder="What's on your mind? One thought per line." aria-label="Thoughts"></textarea>
     <div class="mfoot">
       <div class="seg" id="dumpZones"></div>
-      <span class="hint">⌘↵ to save</span>
+      <span class="hint">One thought per line. Pencil works too.</span>
       <button class="btn" data-act="dumpcancel">Cancel</button>
       <button class="btn primary" data-act="dumpsave">Save</button>
     </div>
@@ -71,27 +69,27 @@
 </div>
 
 <div class="modal" id="stepModal" role="dialog" aria-label="First step">
-  <div class="mbox" style="padding:18px 18px 6px">
+  <div class="mbox" style="padding:22px 22px 6px">
     <div class="sect" style="margin:0">What's the 2-minute first step?</div>
-    <div id="stepCard" style="font-weight:600;font-size:16px;margin:4px 0 12px"></div>
-    <input class="field" id="stepIn2" style="height:40px;font-size:15px" placeholder="Something so small it feels silly" aria-label="First step" autocomplete="off">
+    <div id="stepCard" style="font-weight:650;font-size:var(--t-title3);margin:4px 0 14px"></div>
+    <input class="field" id="stepIn2" placeholder="Something so small it feels silly" aria-label="First step" autocomplete="off">
     <div class="seg" id="stepIdeas" style="margin:10px 0 8px"></div>
-    <p class="dim" style="font-size:12px;margin:0 0 10px">Starting is the hard part. Make it tiny.</p>
-    <div class="mfoot" style="margin:0 -18px"><span class="hint"></span><button class="btn" data-act="stepcancel">Cancel</button><button class="btn primary" data-act="stepgo" id="stepGo">Add to today</button></div>
+    <p class="dim" style="font-size:var(--t-foot);margin:0 0 10px">Starting is the hard part. Make it tiny.</p>
+    <div class="mfoot" style="margin:0 -22px"><span class="hint"></span><button class="btn" data-act="stepcancel">Cancel</button><button class="btn primary" data-act="stepgo" id="stepGo">Add to today</button></div>
   </div>
 </div>
 <div class="modal" id="habitModal" role="dialog" aria-label="Edit habits">
-  <div class="mbox" style="padding:18px 18px 6px">
+  <div class="mbox" style="padding:22px 22px 6px">
     <div class="sect" style="margin:0 0 10px">Habits you want to do most days</div>
     <div id="habitRows" style="display:flex;flex-direction:column;gap:8px"></div>
-    <button class="btn sm" style="margin:10px 0" data-act="hadd">+ Add habit</button>
-    <div class="mfoot" style="margin:0 -18px"><span class="hint">Keep it to 3–5.</span><button class="btn" data-act="hcancel">Cancel</button><button class="btn primary" data-act="hsave">Save</button></div>
+    <button class="btn sm" style="margin:12px 0" data-act="hadd">+ Add habit</button>
+    <div class="mfoot" style="margin:0 -22px"><span class="hint">Keep it to 3–5.</span><button class="btn" data-act="hcancel">Cancel</button><button class="btn primary" data-act="hsave">Save</button></div>
   </div>
 </div>
 <div class="modal" id="confirm" role="dialog" aria-label="Confirm delete">
   <div class="cbox"><p id="cMsg"></p><div class="acts"><button class="btn" data-act="cno">Keep it</button><button class="btn primary" data-act="cyes">Delete</button></div></div>
 </div>
 <div class="toast" id="toast" role="status"></div>
-<script src="app.js"></script>
+<script src="app.js?v=ipad1"></script>
 </body>
 </html>

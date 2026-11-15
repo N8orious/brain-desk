@@ -71,14 +71,16 @@ const P = {
   pause: '<path d="M8.5 5.5v13M15.5 5.5v13"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  chev: '<path d="m7 10 5 5 5-5"/>',
+  tick: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   dump: '<path d="M4 13.5h4.5l1.5 2.5h4l1.5-2.5H20"/><path d="M6 5h12l2 8.5V19H4v-5.5z"/>',
 };
 const ico = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
 function statusIcon(it) {
-  if (it.status === "done") return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--accent)"/><path d="m5 8.3 2 2 4-4.5" fill="none" stroke="var(--accent-ink)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  if (it.status === "dropped") return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="var(--text-3)" stroke-width="1.5"/><path d="M4 12 12 4" stroke="var(--text-3)" stroke-width="1.5"/></svg>`;
-  if (it.today) return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="var(--m-focus)" stroke-width="1.5"/><path d="M8 3.5a4.5 4.5 0 0 1 0 9z" fill="var(--m-focus)"/></svg>`;
-  return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+  if (it.status === "done") return `<svg viewBox="0 0 16 16" width="24" height="24" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--accent)"/><path d="m5 8.3 2 2 4-4.5" fill="none" stroke="var(--accent-ink)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (it.status === "dropped") return `<svg viewBox="0 0 16 16" width="24" height="24" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="var(--text-3)" stroke-width="1.5"/><path d="M4 12 12 4" stroke="var(--text-3)" stroke-width="1.5"/></svg>`;
+  if (it.today) return `<svg viewBox="0 0 16 16" width="24" height="24" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="var(--m-focus)" stroke-width="1.5"/><path d="M8 3.5a4.5 4.5 0 0 1 0 9z" fill="var(--m-focus)"/></svg>`;
+  return `<svg viewBox="0 0 16 16" width="24" height="24" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
 }
 
 /* ============================ STATE ============================ */
@@ -300,49 +302,48 @@ function closeDay() {
 /* ============================ RENDER: SHELL ============================ */
 function render() {
   const mode = currentMode();
-  renderSide(mode); renderTop(mode); renderBodyWrap(mode);
+  renderBar(mode); renderModes(mode); renderTop(mode); renderBodyWrap(mode);
   if (peekId) fillPeek(false);
 }
-function renderSide(mode) {
-  const w = weekStats(), max = Math.max(1, ...w.counts);
-  const navItem = (id, icon, label, cnt) => `<button class="nav" data-act="view" data-v="${id}" aria-current="${view === id}" title="${label}"><span class="ic">${ico(icon)}</span><span class="lbl">${label}</span><span class="cnt">${cnt ?? ""}</span></button>`;
-  let h = `<div class="brand"><span class="logo">${ico("spark", 13)}</span><span class="lbl">Brain Desk</span></div>
-    <button class="dumpbtn" data-act="dump" title="Dump a thought (N)">${ico("plus")}<span class="lbl">Dump a thought</span><kbd>N</kbd></button>
-    ${navItem("now", "now", "Now", todays().length ? todays().length + "/3" : "")}
-    ${navItem("board", "board", "Board", openItems().length)}
-    ${navItem("done", "check", "Done", w.total || "")}
-    <div class="navlabel"><span class="lbl">Modes</span><span class="lbl">${override ? "Manual" : "Auto"}</span></div>`;
-  MODES.forEach(m => {
-    const on = m.id === mode;
-    h += `<button class="nav" data-act="mode" data-m="${m.id}" aria-current="${on && view === "now"}" style="--ic:${m.tint}" title="${m.name}"><span class="ic">${ico(m.icon)}</span><span class="lbl">${m.name}</span>${on ? `<span class="live"></span>` : `<span class="when">${whenLabel(m)}</span>`}</button>`;
-  });
-  if (override) h += `<button class="nav back" data-act="auto" title="Back to schedule">${ico("undo")}<span class="lbl">Back to schedule</span></button>`;
-  h += `<button class="nav" data-act="view" data-v="settings" aria-current="${view === "settings"}" title="GitHub sync" style="margin-top:auto"><span class="ic"><span class="sync" id="sync" data-s="${syncState}"></span></span><span class="lbl">Sync</span></button>`;
-  h += `<div class="sidefoot" style="margin-top:0"><div class="bars">${w.counts.map((c, i) => `<i class="${c ? "on" : ""} ${i === w.dow ? "cur" : ""}" style="height:${3 + Math.round(c / max * 15)}px"></i>`).join("")}</div><span class="lbl">${w.total} done this week</span></div>`;
-  $("#side").innerHTML = h;
+// Floating bar: mode button (left), tab bar (centre), clock + sync + add (right). HIG: tab bar on top on iPad.
+function renderBar(mode) {
+  const m = MODE[mode], t = todays().length, w = weekStats();
+  const tab = (id, label, cnt) => `<button class="tab" role="tab" data-act="view" data-v="${id}" aria-selected="${view === id}">${label}${cnt ? `<span class="cnt">${cnt}</span>` : ""}</button>`;
+  $("#bar").innerHTML = `<button class="modebtn glass" data-act="modes" style="--tint:${m.tint}" aria-label="Mode: ${m.name}. Change mode" aria-haspopup="dialog">
+      <span class="mi">${ico(m.icon, 17)}</span><span class="nm">${m.name}</span>${override ? `<span class="live" title="Turned on by hand"></span>` : ""}<span class="chev">${ico("chev", 14)}</span></button>
+    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", t ? t + "/3" : "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
+    <div class="bar-r"><span class="clock" id="clk">${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>
+      <button class="iconbtn glass" data-act="view" data-v="settings" aria-label="GitHub sync"><span class="sync" id="sync" data-s="${syncState}"></span></button>
+      <button class="addbtn" data-act="dump" aria-label="Dump a thought (N)">${ico("plus", 22)}</button></div>`;
 }
+function renderModes(mode) {
+  const w = weekStats(), max = Math.max(1, ...w.counts);
+  $("#modes").innerHTML = `<div class="ph2">Modes · ${override ? "turned on by hand" : "switching on schedule"}</div>` +
+    MODES.map(m => `<button class="mrow" data-act="mode" data-m="${m.id}" aria-current="${m.id === mode}" style="--ic:${m.tint}"><span class="mi">${ico(m.icon, 18)}</span><span class="nm">${m.name}</span><span class="wh">${whenLabel(m)}</span>${m.id === mode ? `<span class="ck">${ico("tick", 18)}</span>` : ""}</button>`).join("") +
+    `<div class="popfoot"><div class="bars" aria-hidden="true">${w.counts.map((c, i) => `<i class="${c ? "on" : ""} ${i === w.dow ? "cur" : ""}" style="height:${4 + Math.round(c / max * 18)}px"></i>`).join("")}</div><span>${w.total} done this week</span>${override ? `<button data-act="auto">Back to schedule</button>` : ""}</div>`;
+}
+function openModes() { $("#modes").classList.add("open"); }
+function closeModes() { $("#modes").classList.remove("open"); }
+// Large title under the bar, with the time left in this mode.
 function renderTop(mode) {
   const m = MODE[mode], d = new Date();
-  if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="modechip" style="--tint:var(--text-2)"><span class="mi">${ico("refresh", 18)}</span><div><h1>GitHub sync</h1><p>Where your desk is saved</p></div></div>`; return; }
+  const date = d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long" });
+  if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>GitHub sync</h1><p class="line">Where your desk is saved.</p></div>`; return; }
   const title = view === "now" ? m.name : view === "board" ? "Board" : "Done";
-  const line = view === "now" ? m.line : view === "board" ? "Everything open, by zone. Drag to move." : "What you finished and let go of.";
-  const icon = view === "now" ? m.icon : view === "board" ? "board" : "check";
-  const tint = view === "now" ? m.tint : "var(--text-2)";
-  const ov = override && view === "now" ? `<span class="override">On until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>` : "";
-  $("#top").innerHTML = `<div class="modechip" style="--tint:${tint}"><span class="mi">${ico(icon, 18)}</span><div style="min-width:0"><h1>${title}</h1><p>${esc(line)}</p></div></div>
-    <span class="sp"></span>
-    <div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>
-    <div class="clock"><b id="clk">${d.toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</b><span>${d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "short" })}</span></div>`;
+  const line = view === "now" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
+  const ov = override && view === "now" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
+  $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>${title}</h1><p class="line">${esc(line)}</p>${ov}</div>
+    ${view === "now" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
 }
 function renderBodyWrap(mode) { renderBody(mode); updateTimeLeft(); }
 function renderBody(mode) {
-  const b = $("#body"); const y = b.scrollTop;
+  const b = $("#body"), sc = $("#scroll"), y = sc.scrollTop;
   let h = loaded || items.length ? "" : `<div class="status">Loading your desk…</div>`;
   if (!gh.token || syncState === "auth" || view === "settings") h = viewSetup();
   else if (view === "board") h += viewBoard();
   else if (view === "done") h += viewDone();
   else h += ({ plan: vPlan, focus: vFocus, low: vLow, shutdown: vShutdown, reset: vReset, free: vFree, sleep: vSleep }[mode] || vFree)();
-  b.innerHTML = h; b.scrollTop = y;
+  b.innerHTML = h; sc.scrollTop = y;
   if (view === "now" && mode === "focus") drawTimer();
 }
 
@@ -356,24 +357,24 @@ function chips(it) {
   return c.join("");
 }
 function row(it, actions = "") {
-  return `<div class="row ${isOpen(it) ? "" : "isdone"}" data-act="peek" data-id="${esc(it.id)}">
-    <button class="st" data-act="done" data-id="${esc(it.id)}" aria-label="${isOpen(it) ? "Mark done" : "Reopen"}">${statusIcon(it)}</button>
-    <span class="tt">${esc(it.title)}</span>
+  const open = isOpen(it);
+  return `<div class="rowwrap">${open ? `<div class="swipe-bg" aria-hidden="true"></div>` : ""}<div class="row ${open ? "" : "isdone"}" data-act="peek" data-id="${esc(it.id)}"${open ? ` data-swipe="1"` : ""}>
+    <button class="st" data-act="done" data-id="${esc(it.id)}" aria-label="${open ? "Mark done" : "Reopen"}">${statusIcon(it)}</button>
+    <span class="tt"><span class="tl">${esc(it.title)}</span>${it.project ? `<span class="sub2">${esc(it.project)}</span>` : ""}</span>
     <span class="meta">${chips(it)}</span>
-    <span class="proj">${esc(it.project || "")}</span>
     <span class="zdot" style="--c:${zoneOf(it).color}" title="${zoneOf(it).name}"></span>
     ${actions ? `<span class="ra">${actions}</span>` : ""}
-  </div>`;
+  </div></div>`;
 }
 const A = {
   today: it => `<button class="btn sm" data-act="today" data-id="${esc(it.id)}" title="Add to today">${ico("plus", 14)}<span class="bl">Today</span></button>`,
   tomorrow: it => `<button class="btn sm" data-act="tomorrow" data-id="${esc(it.id)}" title="Add to tomorrow">${ico("plus", 14)}<span class="bl">Tomorrow</span></button>`,
-  drop: (it, hov = true) => `<button class="btn sm icon ${hov ? "hov" : ""} bad" data-act="drop" data-id="${esc(it.id)}" aria-label="Let it go" title="Let it go">${ico("x", 14)}</button>`,
+  drop: it => `<button class="btn sm icon bad" data-act="drop" data-id="${esc(it.id)}" aria-label="Let it go" title="Let it go">${ico("x", 18)}</button>`,
   done: it => `<button class="btn sm good" data-act="done" data-id="${esc(it.id)}">Done</button>`,
   keep: it => `<button class="btn sm" data-act="keep" data-id="${esc(it.id)}">Keep</button>`,
   park: it => `<button class="btn sm" data-act="park" data-id="${esc(it.id)}">Park</button>`,
   dropTxt: it => `<button class="btn sm bad" data-act="drop" data-id="${esc(it.id)}">Drop</button>`,
-  untoday: it => `<button class="btn sm icon" data-act="untoday" data-id="${esc(it.id)}" aria-label="Remove from today" title="Remove">${ico("x", 14)}</button>`,
+  untoday: it => `<button class="btn sm icon" data-act="untoday" data-id="${esc(it.id)}" aria-label="Remove from today" title="Remove">${ico("x", 18)}</button>`,
 };
 function panel(title, n, body, extra = "") {
   return `<section class="panel"><div class="ph"><h3>${title}</h3>${n !== "" && n != null ? `<span class="n">${n}</span>` : ""}${extra}</div><div class="pb">${body}</div></section>`;
@@ -383,12 +384,12 @@ function slots(opts = {}) {
   const t = todays(); let h = `<div class="slots">`;
   for (let i = 0; i < 3; i++) {
     const it = t[i];
-    if (!it) { h += `<div class="slot empty-slot"><span class="rk">${i + 1}</span><h4>${opts.emptyText || "Open slot. Add one from the right."}</h4><span></span></div>`; continue; }
+    if (!it) { h += `<div class="slot empty-slot"><span class="rk">${i + 1}</span><h4>${opts.emptyText || "Open slot. Add one from Suggested."}</h4><span></span></div>`; continue; }
     const nx = stepsLeft(it)[0];
     h += `<div class="slot" data-act="peek" data-id="${esc(it.id)}"><span class="rk">${i + 1}</span>
       <div style="min-width:0"><h4>${esc(it.title)}</h4><div class="sub">${esc(it.project || zoneOf(it).name)}${nx ? " · next: " + esc(nx.t) : ""}</div>${nx ? "" : `<button class="linkbtn" data-act="firststep" data-id="${esc(it.id)}">${ico("plus", 13)}Add a 2-minute first step</button>`}
-      ${carried(it) && opts.askCarried !== false ? `<div class="ask"><span class="dim" style="font-size:12px;align-self:center">From ${it.todayDate === addDays(-1) ? "yesterday" : "earlier"}.</span>${A.done(it)}<button class="btn sm" data-act="keep" data-id="${esc(it.id)}">Still on it</button>${A.dropTxt(it)}</div>` : ""}</div>
-      <div class="ra">${opts.slotActions ? opts.slotActions(it) : `<button class="btn sm icon" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done" title="Done">${ico("check", 15)}</button>${A.untoday(it)}`}</div></div>`;
+      ${carried(it) && opts.askCarried !== false ? `<div class="ask"><span class="dim" style="font-size:var(--t-sub)">From ${it.todayDate === addDays(-1) ? "yesterday" : "earlier"}.</span>${A.done(it)}<button class="btn sm" data-act="keep" data-id="${esc(it.id)}">Still on it</button>${A.dropTxt(it)}</div>` : ""}</div>
+      <div class="ra">${opts.slotActions ? opts.slotActions(it) : `<button class="btn sm icon" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done" title="Done">${ico("check", 20)}</button>${A.untoday(it)}`}</div></div>`;
   }
   return h + `</div>`;
 }
@@ -407,9 +408,9 @@ function habitsPanel() {
   const chip = h => {
     const on = !!(h.days && h.days[k]), st = streak(h);
     const dots = [6, 5, 4, 3, 2, 1, 0].map(i => `<i class="${h.days && h.days[addDays(-i)] ? "on" : ""} ${i === 0 ? "td" : ""}"></i>`).join("");
-    return `<button class="habit ${on ? "on" : ""}" data-act="habit" data-id="${esc(h.id)}" aria-pressed="${on}"><span class="hc">${on ? ico("check", 14).replace('<circle cx="12" cy="12" r="8.5"/>', "") : ""}</span><span class="hn">${esc(h.title)}</span><span class="hd" aria-hidden="true">${dots}</span>${st > 1 ? `<span class="hs">${st}d</span>` : ""}</button>`;
+    return `<button class="habit ${on ? "on" : ""}" data-act="habit" data-id="${esc(h.id)}" aria-pressed="${on}"><span class="hc">${on ? ico("tick", 16) : ""}</span><span class="hn">${esc(h.title)}</span><span class="hd" aria-hidden="true">${dots}</span>${st > 1 ? `<span class="hs">${st}d</span>` : ""}</button>`;
   };
-  return `<section class="panel" style="margin-bottom:18px"><div class="ph"><h3>Habits</h3><span class="n">${doneN}/${list.length} today</span><button class="btn sm ghost act" data-act="habitedit">${list.length ? "Edit" : ico("plus", 14) + "Add"}</button></div>
+  return `<section class="panel habits"><div class="ph"><h3>Habits</h3><span class="n">${doneN}/${list.length} today</span><button class="btn sm act" data-act="habitedit">${list.length ? "Edit" : ico("plus", 16) + "Add"}</button></div>
     ${list.length ? `<div class="hrow">${list.map(chip).join("")}</div>` : `<div class="empty">No habits yet. Add the few things you want to do most days.</div>`}</section>`;
 }
 function toggleHabit(id) {
@@ -420,10 +421,10 @@ function toggleHabit(id) {
 }
 function openHabitEdit() {
   const list = habitList();
-  $("#habitRows").innerHTML = list.map(h => `<div class="hedit" data-id="${esc(h.id)}"><input class="field" value="${esc(h.title)}" aria-label="Habit name"><button class="btn sm icon bad" data-act="hrm" aria-label="Remove habit">${ico("x", 14)}</button></div>`).join("");
+  $("#habitRows").innerHTML = list.map(h => `<div class="hedit" data-id="${esc(h.id)}"><input class="field" value="${esc(h.title)}" aria-label="Habit name"><button class="btn sm icon bad" data-act="hrm" aria-label="Remove habit">${ico("x", 18)}</button></div>`).join("");
   $("#habitModal").classList.add("open");
 }
-function addHabitRow() { $("#habitRows").insertAdjacentHTML("beforeend", `<div class="hedit" data-id=""><input class="field" placeholder="New habit, e.g. 20 min walk" aria-label="Habit name"><button class="btn sm icon bad" data-act="hrm" aria-label="Remove habit">${ico("x", 14)}</button></div>`); $("#habitRows").lastElementChild.querySelector("input").focus(); }
+function addHabitRow() { $("#habitRows").insertAdjacentHTML("beforeend", `<div class="hedit" data-id=""><input class="field" placeholder="New habit, e.g. 20 min walk" aria-label="Habit name"><button class="btn sm icon bad" data-act="hrm" aria-label="Remove habit">${ico("x", 18)}</button></div>`); $("#habitRows").lastElementChild.querySelector("input").focus(); }
 function saveHabits() {
   const rows = [...document.querySelectorAll("#habitRows .hedit")], keep = new Set();
   rows.forEach((r, i) => {
@@ -473,9 +474,9 @@ function saveStep() {
 function vPlan() {
   const t = todays(), sug = suggestions(6), dump = inZone("inbox");
   const left = `<section class="panel"><div class="ph"><h3>Today's three</h3><span class="n">${t.length}/3</span></div>${slots()}
-      <div style="padding:0 10px 12px;display:flex;gap:8px;align-items:center"><button class="btn primary lg" data-act="mode" data-m="focus">${ico("target", 15)}Start deep work</button><span class="dim" style="font-size:12px">Hides everything except these.</span></div></section>`;
+      <div class="below"><button class="btn primary lg" data-act="mode" data-m="focus">${ico("target", 18)}Start deep work</button><span class="dim" style="font-size:var(--t-sub)">Hides everything except these.</span></div></section>`;
   const right = panel("Suggested", "", list(sug, it => row(it, A.today(it)), "Nothing waiting. Nice.")) +
-    `<div style="height:18px"></div>` +
+    `<div style="height:26px"></div>` +
     panel("Brain dump", dump.length, list(dump.slice(0, 6), it => row(it, A.today(it) + A.drop(it)), "Empty. Press N whenever something pops up."));
   return habitsPanel() + `<div class="grid g2">${left}<div>${right}</div></div>`;
 }
@@ -489,12 +490,12 @@ function vFocus() {
       <div><h2>${esc(cur.title)}</h2><div class="proj2">${esc(cur.project || zoneOf(cur).name)}${cur.due ? " · due " + fmtDue(cur.due).toLowerCase() : ""}</div></div>
       <div class="nextstep"><span class="lb">Next step</span><span class="tx">${nx ? esc(nx.t) : "Do the first two minutes. That's all."}</span>${nx ? `<button class="btn sm" data-act="stepdone" data-id="${esc(cur.id)}" data-i="${(cur.steps || []).indexOf(nx)}">Done</button>` : `<button class="btn sm" data-act="peek" data-id="${esc(cur.id)}">Add steps</button>`}</div>
       <div class="timer"><div class="ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="none" stroke="var(--line)" stroke-width="7"/><circle id="arc" cx="60" cy="60" r="54" fill="none" stroke="var(--m-focus)" stroke-width="7" stroke-linecap="round" stroke-dasharray="339.3" stroke-dashoffset="0"/></svg><div class="tm" id="tm">25:00</div></div>
-        <div class="tbtns"><button class="btn primary lg" data-act="timer" id="tbtn">${timer.run ? ico("pause", 15) + "Pause" : ico("play", 15) + (timer.left < timer.total ? "Resume" : `Start ${FOCUS_MIN} min`)}</button><button class="btn lg" data-act="plus5">+5 min</button><button class="btn lg good" data-act="done" data-id="${esc(cur.id)}">${ico("check", 15)}I did it</button></div></div>
+        <div class="tbtns"><button class="btn primary lg" data-act="timer" id="tbtn">${timer.run ? ico("pause", 18) + "Pause" : ico("play", 18) + (timer.left < timer.total ? "Resume" : `Start ${FOCUS_MIN} min`)}</button><button class="btn lg" data-act="plus5">+5 min</button><button class="btn lg good" data-act="done" data-id="${esc(cur.id)}">${ico("check", 18)}I did it</button></div></div>
     </section>`;
   const others = t.filter(i => i !== cur);
   const work = inZone("work").filter(i => !i.today).slice(0, 8);
   const side = panel("Up next", others.length, list(others, it => row(it, `<button class="btn sm" data-act="focuson" data-id="${esc(it.id)}">Switch</button>`), "That's the only one. Good.")) +
-    `<div style="height:18px"></div>` + panel("Work queue", work.length, list(work, it => row(it, A.today(it)), "Queue's clear.")) +
+    `<div style="height:26px"></div>` + panel("Work queue", work.length, list(work, it => row(it, A.today(it)), "Queue's clear.")) +
     `<div class="note">${ico("moon", 14)}Builds and life are hidden till 7:30 pm. New thoughts go to the brain dump (N).</div>`;
   return `<div class="focusgrid">${nowCard}<div>${side}</div></div>`;
 }
@@ -509,19 +510,19 @@ function vShutdown() {
   const maybe = openItems().filter(it => !it.today && ((dayOf(it.touchedAt) === k && dayOf(it.createdAt) !== k) || ((it.steps || []).length && !stepsLeft(it).length))).slice(0, 6);
   const doneT = doneOn(k), dumpT = inZone("inbox").filter(it => dayOf(it.createdAt) === k);
   const tick = [...t, ...maybe];
-  const c1 = panel("Tick what's done", "", `${list(tick, it => row(it, A.done(it) + A.dropTxt(it)), "Nothing open from today.")}${doneT.length ? `<div class="sect" style="padding:10px 8px 2px">Done today · ${doneT.length}</div>` + doneT.map(it => row(it)).join("") : ""}`, `<span class="step act">1</span>`);
-  const c2 = panel("Empty your head", "", `<div style="padding:8px"><button class="btn lg" style="width:100%" data-act="dump">${ico("dump", 15)}Dump everything</button><p class="dim" style="font-size:12.5px;margin:8px 2px 4px">One thought per line. It all lands in the brain dump. Sort it another day.</p></div>${dumpT.length ? `<div class="sect" style="padding:6px 8px 2px">Dumped today · ${dumpT.length}</div>` + dumpT.map(it => row(it)).join("") : ""}`, `<span class="step act">2</span>`);
+  const c1 = panel("Tick what's done", "", `${list(tick, it => row(it, A.done(it) + A.dropTxt(it)), "Nothing open from today.")}${doneT.length ? `<div class="sect" style="padding:14px 16px 4px">Done today · ${doneT.length}</div>` + doneT.map(it => row(it)).join("") : ""}`, `<span class="step act">1</span>`);
+  const c2 = panel("Empty your head", "", `<div style="padding:14px"><button class="btn lg" style="width:100%" data-act="dump">${ico("dump", 18)}Dump everything</button><p class="dim" style="font-size:var(--t-sub);margin:10px 4px 2px">One thought per line. It all lands in the brain dump. Sort it another day.</p></div>${dumpT.length ? `<div class="sect" style="padding:14px 16px 4px">Dumped today · ${dumpT.length}</div>` + dumpT.map(it => row(it)).join("") : ""}`, `<span class="step act">2</span>`);
   const fill = 3 - t.length;
   const c3 = panel("Set tomorrow", "", `${slots({ emptyText: "Open slot", askCarried: false, slotActions: it => A.untoday(it) })}
-      ${fill > 0 ? `<div class="sect" style="padding:0 10px">Fill ${fill} more</div>` + list(suggestions(4), it => row(it, A.tomorrow(it)), "") : ""}
-      <div style="padding:10px"><button class="btn primary lg" style="width:100%" data-act="closeday">${ico("moon", 15)}Close the day</button></div>`, `<span class="step act">3</span>`);
+      ${fill > 0 ? `<div class="sect" style="padding:18px 6px 8px">Fill ${fill} more</div>` + list(suggestions(4), it => row(it, A.tomorrow(it)), "") : ""}
+      <div style="padding:14px 0 0"><button class="btn primary lg" style="width:100%" data-act="closeday">${ico("moon", 18)}Close the day</button></div>`, `<span class="step act">3</span>`);
   return habitsPanel() + `<div class="grid g3">${c1}${c2}${c3}</div>`;
 }
 function vFree() {
   const workN = inZone("work").length;
   const b = inZone("builds"), l = inZone("life");
   const pick = [...b, ...l].filter(i => i.energy !== "high").slice(0, 1)[0] || b[0];
-  return habitsPanel() + `${pick ? `<section class="panel" style="margin-bottom:18px"><div class="ph"><h3>If you feel like it</h3><span class="n">no pressure</span></div><div class="pb">${row(pick)}</div></section>` : ""}
+  return habitsPanel() + `${pick ? `<section class="panel" style="margin-bottom:26px"><div class="ph"><h3>If you feel like it</h3><span class="n">no pressure</span></div><div class="pb">${row(pick)}</div></section>` : ""}
     <div class="grid g22">${panel("Builds", b.length, list(b, it => row(it, A.drop(it)), "No builds on the desk."))}${panel("Life", l.length, list(l, it => row(it, A.drop(it)), "Nothing here."))}</div>
     <div class="note">${ico("x", 14)}Work is closed. ${workN} work card${workN === 1 ? "" : "s"} will be there tomorrow.</div>`;
 }
@@ -543,13 +544,13 @@ function vSleep() {
     <p class="muted" style="margin:0">You can stop thinking about it now. It's all on the desk.</p>
     ${t.length ? panel("Tomorrow's three", "", t.map(it => row(it)).join("")) : ""}
     ${habitList().length ? `<div style="width:100%;text-align:left">${habitsPanel()}</div>` : ""}
-    <button class="btn lg" data-act="dump">${ico("dump", 15)}Mind racing? Dump it here</button></div>`;
+    <button class="btn lg" data-act="dump">${ico("dump", 18)}Mind racing? Dump it here</button></div>`;
 }
 
 /* ============================ VIEWS: SETUP ============================ */
 function viewSetup() {
   const bad = gh.token && syncState === "auth";
-  return `<div style="max-width:620px">${panel(gh.token && !bad ? "GitHub sync" : "Connect your desk", "", `<div style="padding:10px 10px 14px;display:flex;flex-direction:column;gap:14px">
+  return `<div style="max-width:640px">${panel(gh.token && !bad ? "GitHub sync" : "Connect your desk", "", `<div style="padding:20px;display:flex;flex-direction:column;gap:16px">
     <p class="muted" style="margin:0">Brain Desk saves your cards to a private GitHub repo, so Claude can update the same desk from chats and scheduled check-ins. Paste a token once on this device.</p>
     ${bad ? `<p style="margin:0;color:var(--bad)">GitHub refused the token or can't find the repo. Check the details below.</p>` : ""}
     <div class="props"><label class="k" for="ghOwner">GitHub user</label><input class="field" id="ghOwner" value="${esc(gh.owner)}" autocapitalize="off" autocorrect="off">
@@ -557,32 +558,33 @@ function viewSetup() {
       <label class="k" for="ghToken">Token</label><input class="field" id="ghToken" type="password" placeholder="github_pat_…" value="${esc(gh.token)}" autocapitalize="off" autocorrect="off"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary lg" data-act="connect">Connect</button>${gh.token ? `<button class="btn lg" data-act="disconnect">Forget token on this device</button>` : ""}${gh.token && !bad ? `<button class="btn lg ghost" data-act="view" data-v="now">Back</button>` : ""}</div>
     <div class="sect" style="margin:6px 0 0">Make a token (2 minutes)</div>
-    <ol class="muted" style="margin:0;padding-left:18px;line-height:1.7;font-size:13px">
+    <ol class="muted" style="margin:0;padding-left:20px;line-height:1.7;font-size:var(--t-sub)">
       <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:var(--accent)">github.com/settings/personal-access-tokens/new</a></li>
       <li>Name it "Brain Desk iPad", expiration: 1 year</li>
       <li>Repository access: <b>Only select repositories</b> → ${esc(gh.repo)}</li>
       <li>Permissions → Repository → <b>Contents: Read and write</b></li>
       <li>Generate, copy, paste above</li>
     </ol>
-    <p class="dim" style="margin:0;font-size:12px">The token stays on this device only. It can't touch any other repo.</p></div>`)}</div>`;
+    <p class="dim" style="margin:0;font-size:var(--t-foot)">The token stays on this device only. It can't touch any other repo.</p></div>`)}</div>`;
 }
 
 /* ============================ VIEWS: BOARD / DONE ============================ */
 function viewBoard() {
-  return `<div class="board" id="board">${ZONES.map(z => {
+  return `<div class="board" id="board"><div class="cols">${ZONES.map(z => {
     const arr = inZone(z.id).sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0) || (touched(b) || "").localeCompare(touched(a) || ""));
-    return `<div class="col" data-zone="${z.id}"><div class="colh"><span class="zdot" style="--c:${z.color}"></span><h3>${z.name}</h3><span class="n">${arr.length}</span><button class="btn sm icon ghost" data-act="dump" data-z="${z.id}" aria-label="Add to ${z.name}">${ico("plus", 15)}</button></div>
+    return `<div class="col" data-zone="${z.id}"><div class="colh"><span class="zdot" style="--c:${z.color}"></span><h3>${z.name}</h3><span class="n">${arr.length}</span><button class="btn sm icon ghost" data-act="dump" data-z="${z.id}" aria-label="Add to ${z.name}">${ico("plus", 20)}</button></div>
       <div class="cards">${arr.map(it => `<div class="bcard" data-act="peek" data-id="${esc(it.id)}"><div class="bt"><button class="st" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done">${statusIcon(it)}</button><span class="tt">${esc(it.title)}</span></div>
         <div class="bm">${it.project ? `<span class="proj">${esc(it.project)}</span>` : ""}${chips(it)}</div></div>`).join("") || `<div class="empty">Empty</div>`}</div></div>`;
-  }).join("")}</div>`;
+  }).join("")}</div></div>`;
 }
 function viewDone() {
   const done = items.filter(it => it.status === "done" && it.doneAt && ago(it.doneAt) < 14).sort((a, b) => b.doneAt.localeCompare(a.doneAt));
   const groups = {}; done.forEach(it => { const k = dayOf(it.doneAt); (groups[k] = groups[k] || []).push(it); });
   const label = k => k === dayKey() ? "Today" : k === addDays(-1) ? "Yesterday" : new Date(k + "T00:00").toLocaleDateString("en", { weekday: "long", day: "numeric", month: "short" });
   const dropped = items.filter(it => it.status === "dropped").sort((a, b) => (b.droppedAt || "").localeCompare(a.droppedAt || "")).slice(0, 20);
-  const left = Object.keys(groups).length ? Object.entries(groups).map(([k, arr]) => panel(label(k), arr.length, arr.map(it => row(it)).join(""))).join(`<div style="height:14px"></div>`) : panel("Done", "", `<div class="empty">Nothing finished in the last two weeks yet. Tick the circle on any card.</div>`);
-  return `<div class="grid g2"><div>${left}</div>${panel("Let go", dropped.length, list(dropped, it => row(it, `<button class="btn sm" data-act="restore" data-id="${esc(it.id)}">${ico("undo", 14)}Restore</button>`), "Nothing dropped."))}</div>`;
+  const left = Object.keys(groups).length ? Object.entries(groups).map(([k, arr]) => panel(label(k), arr.length, arr.map(it => row(it)).join(""))).join(`<div style="height:22px"></div>`) : panel("Done", "", `<div class="empty">Nothing finished in the last two weeks yet. Tick the circle on any card.</div>`);
+  const w = weekStats();
+  return `<div class="statline"><span class="big">${w.total}</span><p>done this week</p></div><div class="grid g2"><div>${left}</div>${panel("Let go", dropped.length, list(dropped, it => row(it, `<button class="btn sm" data-act="restore" data-id="${esc(it.id)}">${ico("undo", 16)}Restore</button>`), "Nothing dropped."))}</div>`;
 }
 
 /* ============================ PEEK ============================ */
@@ -603,7 +605,7 @@ const seg = (opts, val, key, toggle = true) => opts.map(([k, l]) => `<button typ
 function fillPeek(full) {
   const it = items.find(i => i.id === peekId); if (!it) { closePeek(); return; }
   const z = zoneOf(it);
-  $("#pkHead").innerHTML = `<span class="zdot" style="--c:${z.color}"></span><span>${z.name} · added ${new Date(it.createdAt || Date.now()).toLocaleDateString("en", { day: "numeric", month: "short" })}${it.source && it.source !== "canvas" ? " · by " + (it.source === "claude" ? "Claude" : esc(it.source)) : ""}</span><button class="btn sm icon ghost" data-act="closepeek" aria-label="Close">${ico("x", 16)}</button>`;
+  $("#pkHead").innerHTML = `<span class="zdot" style="--c:${z.color}"></span><span>${z.name} · added ${new Date(it.createdAt || Date.now()).toLocaleDateString("en", { day: "numeric", month: "short" })}${it.source === "claude" ? " · by Claude" : it.source === "obsidian" ? " · from Obsidian" : ""}</span><button class="btn sm icon" data-act="closepeek" aria-label="Close">${ico("x", 20)}</button>`;
   const ae = document.activeElement;
   if (full || ae !== $("#pkTitle")) $("#pkTitle").value = it.title || "";
   if (full || ae !== $("#pkNotes")) $("#pkNotes").value = it.notes || "";
@@ -616,7 +618,7 @@ function fillPeek(full) {
   $("#pkSize").innerHTML = seg(SIZES, it.size || "", "size");
   $("#pkEnergy").innerHTML = seg(ENERGY, it.energy || "", "energy");
   const st = it.steps || [];
-  $("#pkSteps").innerHTML = st.length ? st.map((s, i) => `<div class="srow ${s.done ? "done" : ""}"><button class="cb" data-act="step" data-i="${i}" aria-label="Toggle step">${ico("check", 12).replace('<circle cx="12" cy="12" r="8.5"/>', "")}</button><span>${esc(s.t)}</span><button class="btn sm icon ghost" data-act="delstep" data-i="${i}" aria-label="Remove step">${ico("x", 13)}</button></div>`).join("") : `<div class="dim" style="font-size:12.5px;padding:2px 4px 6px">Big or vague? Break off one piece you could start in two minutes.</div>`;
+  $("#pkSteps").innerHTML = st.length ? st.map((s, i) => `<div class="srow ${s.done ? "done" : ""}"><button class="cb" data-act="step" data-i="${i}" aria-label="Toggle step"><i>${ico("tick", 15)}</i></button><span>${esc(s.t)}</span><button class="btn sm icon ghost" data-act="delstep" data-i="${i}" aria-label="Remove step">${ico("x", 18)}</button></div>`).join("") : `<div class="dim" style="font-size:var(--t-sub);padding:2px 0 6px">Big or vague? Break off one piece you could start in two minutes.</div>`;
 }
 function onProp(k, v, tg) {
   const it = items.find(i => i.id === peekId); if (!it) return;
@@ -672,12 +674,15 @@ function toast(msg, undo) {
 let suppressClick = false;
 document.addEventListener("click", e => {
   if (suppressClick) { suppressClick = false; e.preventDefault(); return; }
-  const el = e.target.closest("[data-act]"); if (!el) return;
+  const el = e.target.closest("[data-act]");
+  if ($("#modes").classList.contains("open") && !e.target.closest("#modes") && !(el && el.dataset.act === "modes")) { closeModes(); if (!el) return; }
+  if (!el) return;
   const a = el.dataset.act, id = el.dataset.id;
   switch (a) {
-    case "view": view = el.dataset.v; store("view", view); render(); break;
-    case "mode": setMode(el.dataset.m); break;
-    case "auto": override = null; store("override", null); view = "now"; render(); break;
+    case "view": view = el.dataset.v; store("view", view); $("#scroll").scrollTop = 0; render(); break;
+    case "modes": $("#modes").classList.contains("open") ? closeModes() : openModes(); break;
+    case "mode": closeModes(); setMode(el.dataset.m); break;
+    case "auto": closeModes(); override = null; store("override", null); view = "now"; render(); break;
     case "dump": openDump(el.dataset.z || "inbox"); break;
     case "dumpzone": dumpZone = el.dataset.z; renderDumpZones(); break;
     case "dumpsave": saveDump(); break;
@@ -733,13 +738,50 @@ $("#stepIn2").addEventListener("keydown", e => { if (e.key === "Enter") { e.prev
 $("#dumpTxt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveDump(); } });
 document.addEventListener("keydown", e => {
   const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
-  if (e.key === "Escape") { if ($("#stepModal").classList.contains("open")) { closeModal("#stepModal"); return; } if ($("#habitModal").classList.contains("open")) { closeModal("#habitModal"); return; } if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
+  if (e.key === "Escape") { if ($("#modes").classList.contains("open")) { closeModes(); return; } if ($("#stepModal").classList.contains("open")) { closeModal("#stepModal"); return; } if ($("#habitModal").classList.contains("open")) { closeModal("#habitModal"); return; } if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "n" || e.key === "N") { e.preventDefault(); openDump(); }
   if (e.key === "1") { view = "now"; store("view", view); render(); }
   if (e.key === "2") { view = "board"; store("view", view); render(); }
   if (e.key === "3") { view = "done"; store("view", view); render(); }
+  if (e.key === "m" || e.key === "M") { e.preventDefault(); $("#modes").classList.contains("open") ? closeModes() : openModes(); }
 });
+
+/* swipe on list rows (touch and Pencil): right = done, left = let go. HIG: the buttons stay as the alternative. */
+let sw = null;
+const SWIPE_AT = 96;
+$("#body").addEventListener("pointerdown", e => {
+  if (e.pointerType === "mouse") return;
+  const r = e.target.closest('.row[data-swipe="1"]'); if (!r || e.target.closest("button")) return;
+  sw = { el: r, bg: r.previousElementSibling, id: r.dataset.id, x: e.clientX, y: e.clientY, dx: 0, on: false };
+});
+window.addEventListener("pointermove", e => {
+  if (!sw) return;
+  const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+  if (!sw.on) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { sw = null; return; }
+    if (Math.abs(dx) < 12) return;
+    sw.on = true; sw.el.classList.add("swiping");
+  }
+  sw.dx = dx;
+  sw.bg.className = "swipe-bg " + (dx > 0 ? "r" : "l");
+  sw.bg.innerHTML = dx > 0 ? `<span>${ico("check", 22)}</span><span></span>` : `<span></span><span>${ico("x", 22)}</span>`;
+  sw.bg.style.opacity = Math.min(1, Math.abs(dx) / SWIPE_AT);
+  sw.el.style.transform = `translateX(${dx}px)`;
+});
+function endSwipe(cancel) {
+  if (!sw) return;
+  const s = sw; sw = null;
+  if (!s.on) return;
+  suppressClick = true; setTimeout(() => suppressClick = false, 60);
+  s.el.classList.remove("swiping");
+  if (!cancel && Math.abs(s.dx) >= SWIPE_AT) {
+    s.el.style.transform = `translateX(${s.dx > 0 ? "110%" : "-110%"})`;
+    setTimeout(() => (s.dx > 0 ? markDone : dropIt)(s.id), 180);
+  } else { s.el.style.transform = ""; }
+}
+window.addEventListener("pointerup", () => endSwipe(false));
+window.addEventListener("pointercancel", () => endSwipe(true));
 
 /* board drag: mouse drags after 5px; touch needs a short press so scrolling still works */
 let drag = null;
