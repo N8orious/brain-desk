@@ -348,7 +348,7 @@ function renderTop(mode) {
   const date = d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long" });
   if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>GitHub sync</h1><p class="line">Where your desk is saved.</p></div>`; return; }
   const title = view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "Board" : "Done";
-  const line = view === "now" ? `${m.name}: ${FOR_MODE[mode] || ""}. Tap a card to mark it active.` : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
+  const line = view === "now" ? "What you're on right now. Tap a project to turn it on or off." : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
   const ov = override && view === "today" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
   $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>${title}</h1><p class="line">${esc(line)}</p>${ov}</div>
     ${view === "today" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
@@ -586,55 +586,58 @@ const FIT = {
 const FOR_MODE = { plan: "SUPR first", focus: "SUPR first, everything else waits", low: "Easy life stuff first", shutdown: "Wrap up SUPR, then life", reset: "Side projects and life first", free: "Side projects first, SUPR after", sleep: "Nothing urgent" };
 const WHO = ["Agni", "Pani", "Harsh", "Rohan", "client", "brand team"];
 const sideRank = it => { const r = parseInt(it.rank, 10); return r > 0 ? r : 99; };
+// Same keys as desk.py: w:Zoca, b:TLLY, i:Printer, and life admin as one stream (l:life).
+const streamKey = it => { const z = it.zone || "inbox"; return z === "life" ? "l:life" : ({ work: "w:", builds: "b:" }[z] || "i:") + (it.project || it.title); };
+const dueRank = (it, t) => it.due && it.due <= t ? 0 : 1;
 function streams() {
-  const open = openItems();
-  const activeSide = new Set(open.filter(it => it.zone === "builds" && sideRank(it) <= 2).map(it => it.project || it.title));
-  const groups = new Map();
-  const add = (k, meta, it) => { if (!groups.has(k)) groups.set(k, Object.assign({ key: k, cards: [] }, meta)); groups.get(k).cards.push(it); };
+  const open = openItems(), groups = new Map();
   open.forEach(it => {
-    const z = it.zone || "inbox", pr = it.project || it.title;
-    if (z === "work") add("w:" + pr, { name: pr, area: "SUPR", zone: "work", order: 1 }, it);
-    else if (z === "builds" && (activeSide.has(pr) || it.today)) add("b:" + pr, { name: pr, area: sideRank(it) < 99 ? `Side project #${sideRank(it)}` : "Side project", zone: "builds", order: 2 + Math.min(sideRank(it), 9) / 10 }, it);
-    else if (z === "life") add("l:life", { name: "Life admin", area: "Life", zone: "life", order: 4 }, it);
+    const k = streamKey(it), z = it.zone || "inbox";
+    if (!groups.has(k)) groups.set(k, { key: k, name: k === "l:life" ? "Life admin" : k.slice(2), zone: z === "life" ? "life" : z,
+      area: z === "work" ? "SUPR" : z === "builds" ? "Side project" : z === "life" ? "Life" : "Brain dump", cards: [] });
+    groups.get(k).cards.push(it);
   });
-  const wk = weekStats(), mon = Date.now() - (wk.dow * 864e5) - 864e5;
+  const t = dayKey(), wk = weekStats(), mon = Date.now() - (wk.dow * 864e5) - 864e5;
   return [...groups.values()].map(g => {
-    g.cards.sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0) || (a.todayRank ?? 9) - (b.todayRank ?? 9) || (a.due || "9").localeCompare(b.due || "9") || sideRank(a) - sideRank(b));
-    const all = items.filter(it => (g.zone === "life" ? it.zone === "life" : (it.project || it.title) === g.name && it.zone === g.zone));
+    // overdue and due today first, then on Today, then by due date
+    g.cards.sort((a, b) => dueRank(a, t) - dueRank(b, t) || (b.today ? 1 : 0) - (a.today ? 1 : 0) || (a.due || "9").localeCompare(b.due || "9") || a.title.localeCompare(b.title));
+    const all = items.filter(it => streamKey(it) === g.key);
     const last = Math.max(...all.map(it => Date.parse(it.doneAt || "") || 0), ...g.cards.map(it => Date.parse(touched(it) || "") || 0));
     const hrs = (Date.now() - last) / 36e5;
-    g.active = !!(streamState[g.key] && streamState[g.key].active);
-    g.on = Date.parse((streamState[g.key] || {}).at || "") || 0;
-    g.last = last;
+    const st = streamState[g.key] || {};
+    g.active = !!st.active; g.on = Date.parse(st.at || "") || 0; g.last = last;
     g.rank = Math.min(...g.cards.map(sideRank));
+    if (g.zone === "builds" && g.rank < 99) g.area = `Side project #${g.rank}`;
     g.done = all.filter(it => it.status === "done" && Date.parse(it.doneAt || "") > mon).length;
     g.ago = !last ? "" : hrs < 1 ? "just now" : hrs < 24 ? `${Math.round(hrs)}h ago` : `${Math.round(hrs / 24)}d ago`;
-    g.next = g.cards[0];
-    g.due = g.cards.map(it => it.due).filter(Boolean).sort()[0] || "";
+    g.urgent = g.cards.filter(it => it.due && it.due <= t).length;
     g.who = WHO.find(w => g.cards.some(it => (it.title + " " + (it.notes || "")).toLowerCase().includes(w.toLowerCase()))) || "";
     return g;
-  }).sort((a, b) => {
-    const fit = FIT[currentMode()] || FIT.free;
-    if (a.active !== b.active) return a.active ? -1 : 1;                 // tapped-on cards always lead
-    if (a.active) return b.on - a.on;                                     // the one you tapped last is #1
-    return (fit[b.zone] ?? 0) - (fit[a.zone] ?? 0) || a.rank - b.rank || b.last - a.last || a.name.localeCompare(b.name);
   });
 }
 function viewNow() {
-  const ss = streams();
-  if (!ss.length) return `<div class="empty">Nothing in motion. Add something with + or tell Task Master.</div>`;
+  const ss = streams(), fit = FIT[currentMode()] || FIT.free, t = dayKey();
+  const on = ss.filter(g => g.active).sort((a, b) => b.on - a.on);               // last turned on leads
+  const off = ss.filter(g => !g.active).sort((a, b) => (fit[b.zone] ?? 0) - (fit[a.zone] ?? 0) || a.rank - b.rank || b.last - a.last || a.name.localeCompare(b.name));
+  const cardRow = it => {
+    const step = stepsLeft(it)[0], late = it.due && it.due < t, today = it.due === t;
+    return `<button class="scard" data-act="peek" data-id="${esc(it.id)}"><span class="sc-t">${esc(it.title)}</span>
+      ${it.due ? `<span class="sc-due ${late ? "late" : today ? "today" : ""}">${late ? "overdue · " : ""}${fmtDue(it.due)}</span>` : ""}
+      <span class="sc-s">${step ? "→ " + esc(step.t) : "No first step yet"}</span></button>`;
+  };
   const tile = g => {
-    const nx = g.next, step = nx ? stepsLeft(nx)[0] : null, more = g.cards.slice(1), showAll = openStreams[g.key];
-    const zc = ZONE[g.zone] ? ZONE[g.zone].color : "var(--text-3)";
-    return `<section class="stream ${g.active ? "on" : "off"}" data-act="streamtoggle" data-k="${esc(g.key)}" role="button" tabindex="0" aria-pressed="${g.active}" aria-label="${esc(g.name)}: tap to mark ${g.active ? "inactive" : "active"}" style="--zc:${zc}">
-      <div class="sh"><span class="zdot" style="--c:${zc}"></span><span class="sa">${esc(g.area)}</span></div>
+    const zc = ZONE[g.zone] ? ZONE[g.zone].color : "var(--text-3)", showAll = openStreams[g.key], list = showAll ? g.cards : g.cards.slice(0, 4);
+    return `<section class="stream on" data-act="streamtoggle" data-k="${esc(g.key)}" role="button" tabindex="0" aria-pressed="true" aria-label="${esc(g.name)}: tap to turn off" style="--zc:${zc}">
+      <div class="sh"><span class="zdot" style="--c:${zc}"></span><span class="sa">${esc(g.area)}</span>${g.urgent ? `<span class="sc-due late">${g.urgent} due</span>` : ""}</div>
       <h3>${esc(g.name)}</h3>
-      ${nx ? `<button class="snext" data-act="peek" data-id="${esc(nx.id)}"><span class="lb">${nx.today ? "On today" : "Next"}</span><span class="tx">${esc(step ? step.t : nx.title)}</span>${step ? `<span class="of">${esc(nx.title)}</span>` : ""}</button>` : ""}
-      ${more.length ? `<div class="smore">${(showAll ? more : more.slice(0, 2)).map(it => `<button class="sitem" data-act="peek" data-id="${esc(it.id)}">${statusIcon(it).replace(/width="24" height="24"/, 'width="18" height="18"')}<span>${esc(it.title)}</span></button>`).join("")}${more.length > 2 ? `<button class="linkbtn" data-act="streammore" data-k="${esc(g.key)}">${showAll ? "Show less" : `+${more.length - 2} more`}</button>` : ""}</div>` : ""}
-      <div class="sf"><span>${g.cards.length} open</span>${g.done ? `<span>${g.done} done this week</span>` : ""}${g.who ? `<span>with ${esc(g.who)}</span>` : ""}${g.due ? `<span class="${g.due < dayKey() ? "late" : ""}">due ${fmtDue(g.due).toLowerCase()}</span>` : ""}<span class="ago">${g.ago}</span></div>
+      <div class="scards">${list.map(cardRow).join("")}${g.cards.length > 4 ? `<button class="linkbtn" data-act="streammore" data-k="${esc(g.key)}">${showAll ? "Show less" : `+${g.cards.length - 4} more`}</button>` : ""}</div>
+      <div class="sf"><span>${g.cards.length} open</span>${g.done ? `<span>${g.done} done this week</span>` : ""}${g.who ? `<span>with ${esc(g.who)}</span>` : ""}<span class="ago">${g.ago}</span></div>
     </section>`;
   };
-  return `<div class="streams">${ss.map(tile).join("")}</div>`;
+  const chip = g => `<button class="schip" data-act="streamtoggle" data-k="${esc(g.key)}" style="--zc:${ZONE[g.zone] ? ZONE[g.zone].color : "var(--text-3)"}"><span class="zdot" style="--c:var(--zc)"></span>${esc(g.name)}<span class="n">${g.cards.length}</span>${g.urgent ? `<span class="sc-due late">${g.urgent} due</span>` : ""}</button>`;
+  return (on.length ? `<div class="streams">${on.map(tile).join("")}</div>`
+      : `<div class="empty">Nothing on right now. Tap a project below, or tell Task Master "I'm on A, B, C".</div>`) +
+    (off.length ? `<div class="ph" style="margin-top:26px"><h3>Not on right now</h3><span class="n">${off.length}</span></div><div class="schips">${off.map(chip).join("")}</div>` : "");
 }
 
 /* auto-arrange: tiles pack into columns with no gaps (grid rows of 4px, each tile spans its height),
