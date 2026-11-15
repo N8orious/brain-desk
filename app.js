@@ -85,7 +85,7 @@ function statusIcon(it) {
 }
 
 /* ============================ STATE ============================ */
-let items = [], habits = {}, loaded = false;
+let items = [], habits = {}, streamState = {}, loaded = false;
 let view = recall("view", "now");
 let gh = { owner: recall("owner", DATA.owner), repo: recall("repo", DATA.repo), token: recall("token", "") };
 let override = recall("override", null);
@@ -192,8 +192,9 @@ async function readFile(useEtag) {
   return { data: JSON.parse(dec(j.content) || "{}"), sha: j.sha };
 }
 function applyOps(data, ops) {
-  data.items = data.items || {}; data.habits = data.habits || {};
+  data.items = data.items || {}; data.habits = data.habits || {}; data.streams = data.streams || {};
   ops.forEach(op => {
+    if (op.t === "sset") { data.streams[op.id] = op.doc; return; }
     if (op.t === "hset") data.habits[op.id] = Object.assign(data.habits[op.id] || {}, op.doc);
     else if (op.t === "hdel") delete data.habits[op.id];
     else if (op.t === "htick") { const h = data.habits[op.id]; if (h) { h.days = h.days || {}; if (op.val) h.days[op.date] = true; else delete h.days[op.date]; } }
@@ -221,7 +222,7 @@ async function flush() {
       if (r.ok) {
         const j = await r.json(); fileSha = j.content.sha; etag = null;
         queue = queue.slice(ops.length);
-        if (!queue.length) { items = toList(data); habits = data.habits || {}; cacheLocal(); render(); }
+        if (!queue.length) { items = toList(data); habits = data.habits || {}; streamState = data.streams || {}; cacheLocal(); render(); }
         setSync("saved"); break;
       }
       if (r.status !== 409 && r.status !== 422) throw new Error("GitHub " + r.status);
@@ -234,6 +235,7 @@ async function flush() {
 }
 function commitMsg(ops) {
   const op = ops[0];
+  if (op.t === "sset") return `desk: ${op.doc.active ? "active" : "inactive"} ${op.id.slice(2)}`.slice(0, 72);
   if (op.t[0] === "h") return `desk: habit ${op.t === "htick" ? (op.val ? "tick" : "untick") : op.t === "hdel" ? "remove" : "edit"} ${(habits[op.id] || op.doc || {}).title || op.id}`.slice(0, 72);
   const t = op.t === "create" ? op.doc.title : (items.find(i => i.id === op.id) || {}).title || op.id;
   const verb = op.t === "create" ? "add" : op.t === "delete" ? "delete" : op.patch.status === "done" ? "done" : op.patch.status === "dropped" ? "drop" : op.patch.today === true ? "today" : "edit";
@@ -243,7 +245,7 @@ async function poll(force) {
   if (!gh.token || flushing || queue.length || (!force && document.visibilityState === "hidden")) return;
   try {
     const f = await readFile(!force);
-    if (f && !queue.length) { fileSha = f.sha; items = toList(f.data); habits = f.data.habits || {}; cacheLocal(); if (!drag || !drag.started) render(); }
+    if (f && !queue.length) { fileSha = f.sha; items = toList(f.data); habits = f.data.habits || {}; streamState = f.data.streams || {}; cacheLocal(); if (!drag || !drag.started) render(); }
     loaded = true; if (syncState === "error") setSync("saved");
   } catch (e) { if (e.status === 401 || e.status === 403 || e.status === 404) { setSync("auth"); render(); } else setSync("error"); }
 }
@@ -262,7 +264,7 @@ async function refreshNow() {
   } catch (e) { toast("Couldn't refresh. Check your connection."); }
   finally { refreshing = false; const b2 = $("#refreshBtn"); if (b2) b2.classList.remove("spin"); }
 }
-function cacheLocal() { store("cache", items); store("hcache", habits); }
+function cacheLocal() { store("cache", items); store("hcache", habits); store("scache", streamState); }
 function setSync(s) { syncState = s; const el = $("#sync"); if (el) { el.dataset.s = s; el.title = { idle: "", saving: "Saving to GitHub…", saved: "Saved to GitHub", error: "Offline. Changes will sync when you're back.", auth: "GitHub access needs fixing" }[s] || ""; } }
 
 /* ============================ WRITES ============================ */
@@ -346,7 +348,7 @@ function renderTop(mode) {
   const date = d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long" });
   if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>GitHub sync</h1><p class="line">Where your desk is saved.</p></div>`; return; }
   const title = view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "Board" : "Done";
-  const line = view === "now" ? `Everything you've got going. ${m.name}, ${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}.` : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
+  const line = view === "now" ? "Everything you've got going. Tap a switch to mark it active." : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
   const ov = override && view === "today" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
   $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>${title}</h1><p class="line">${esc(line)}</p>${ov}</div>
     ${view === "today" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
@@ -360,7 +362,9 @@ function renderBody(mode) {
   else if (view === "done") h += viewDone();
   else if (view === "now") h += viewNow();
   else h += ({ plan: vPlan, focus: vFocus, low: vLow, shutdown: vShutdown, reset: vReset, free: vFree, sleep: vSleep }[mode] || vFree)();
+  const before = view === "now" ? tilePos() : null;
   b.innerHTML = h; sc.scrollTop = y;
+  if (view === "now") { packTiles(); if (before) flip(before); }
   if (view === "today" && mode === "focus") drawTimer();
 }
 
@@ -564,22 +568,15 @@ function vSleep() {
     <button class="btn lg" data-act="dump">${ico("dump", 18)}Mind racing? Dump it here</button></div>`;
 }
 
-/* ============================ VIEW: NOW (live workstreams) ============================
-   Every thread he has going, as a wall of tiles: SUPR projects, his active side projects (rank 1-2) and life admin.
-   Status comes from activity: live (touched in the last 2 h or on today), moving, slowing, stalled.
-   SUPR streams dim outside weekday 10:30-7 (his rule: studio work only on weekdays). */
+/* ============================ VIEW: NOW (workstreams) ============================
+   Every thread he has going: SUPR projects, active side projects (rank 1-2) and life admin, one tile each.
+   He marks a stream active or inactive by tapping its switch; that's saved in items.json under "streams"
+   (keys like "w:Zoca", "b:Peeko", "l:life"), so Task Master can flip it too with `desk.py stream`. */
 const openStreams = {};
 const WHO = ["Agni", "Pani", "Harsh", "Rohan", "client", "brand team"];
-function workOpen(d = new Date()) { const day = d.getDay(), m = d.getHours() * 60 + d.getMinutes(); return day >= 1 && day <= 5 && m >= 630 && m < 1140; }
-function workBack(d = new Date()) {
-  const day = d.getDay(), m = d.getHours() * 60 + d.getMinutes();
-  if (day >= 1 && day <= 5 && m < 630) return "back at 10:30";
-  if (day >= 1 && day <= 4) return "back tomorrow 10:30";
-  return "back Monday 10:30";
-}
 const sideRank = it => { const r = parseInt(it.rank, 10); return r > 0 ? r : 99; };
 function streams() {
-  const open = openItems(), live = workOpen();
+  const open = openItems();
   const activeSide = new Set(open.filter(it => it.zone === "builds" && sideRank(it) <= 2).map(it => it.project || it.title));
   const groups = new Map();
   const add = (k, meta, it) => { if (!groups.has(k)) groups.set(k, Object.assign({ key: k, cards: [] }, meta)); groups.get(k).cards.push(it); };
@@ -590,43 +587,60 @@ function streams() {
     else if (z === "life") add("l:life", { name: "Life admin", area: "Life", zone: "life", order: 4 }, it);
   });
   const wk = weekStats(), mon = Date.now() - (wk.dow * 864e5) - 864e5;
-  const out = [...groups.values()].map(g => {
+  return [...groups.values()].map(g => {
     g.cards.sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0) || (a.todayRank ?? 9) - (b.todayRank ?? 9) || (a.due || "9").localeCompare(b.due || "9") || sideRank(a) - sideRank(b));
     const all = items.filter(it => (g.zone === "life" ? it.zone === "life" : (it.project || it.title) === g.name && it.zone === g.zone));
     const last = Math.max(...all.map(it => Date.parse(it.doneAt || "") || 0), ...g.cards.map(it => Date.parse(touched(it) || "") || 0));
     const hrs = (Date.now() - last) / 36e5;
+    g.active = !!(streamState[g.key] && streamState[g.key].active);
+    g.last = last;
     g.done = all.filter(it => it.status === "done" && Date.parse(it.doneAt || "") > mon).length;
-    g.today = g.cards.some(it => it.today);
-    g.closed = g.zone === "work" && !live;
-    g.status = g.closed ? "closed" : (hrs < 2 || (g.today && hrs < 8)) ? "live" : hrs < 48 ? "moving" : hrs < 24 * 7 ? "slowing" : "stalled";
     g.ago = !last ? "" : hrs < 1 ? "just now" : hrs < 24 ? `${Math.round(hrs)}h ago` : `${Math.round(hrs / 24)}d ago`;
     g.next = g.cards[0];
     g.due = g.cards.map(it => it.due).filter(Boolean).sort()[0] || "";
     g.who = WHO.find(w => g.cards.some(it => (it.title + " " + (it.notes || "")).toLowerCase().includes(w.toLowerCase()))) || "";
     return g;
-  });
-  const rankSt = { live: 0, moving: 1, slowing: 2, stalled: 3, closed: 5 };
-  return out.sort((a, b) => rankSt[a.status] - rankSt[b.status] || a.order - b.order || a.name.localeCompare(b.name));
+  }).sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || (a.active ? b.last - a.last : a.order - b.order) || a.name.localeCompare(b.name));
 }
-const ST = { live: "Live", moving: "Moving", slowing: "Slowing down", stalled: "Stalled", closed: "Closed" };
 function viewNow() {
   const ss = streams();
   if (!ss.length) return `<div class="empty">Nothing in motion. Add something with + or tell Task Master.</div>`;
-  const counts = ["live", "moving", "slowing", "stalled"].map(k => [k, ss.filter(s => s.status === k).length]).filter(x => x[1]);
-  const summary = `<div class="streamsum">${counts.map(([k, n]) => `<span class="pill ${k}"><i></i>${n} ${ST[k].toLowerCase()}</span>`).join("")}${ss.some(s => s.closed) ? `<span class="pill closed"><i></i>SUPR ${workBack()}</span>` : ""}</div>`;
   const tile = g => {
     const nx = g.next, step = nx ? stepsLeft(nx)[0] : null, more = g.cards.slice(1), showAll = openStreams[g.key];
     const zc = ZONE[g.zone] ? ZONE[g.zone].color : "var(--text-3)";
-    return `<section class="stream st-${g.status}" style="--zc:${zc}">
-      <div class="sh"><span class="zdot" style="--c:${zc}"></span><span class="sa">${esc(g.area)}</span><span class="pill ${g.status}"><i></i>${g.closed ? workBack() : ST[g.status]}</span></div>
+    return `<section class="stream ${g.active ? "on" : "off"}" data-k="${esc(g.key)}" style="--zc:${zc}">
+      <div class="sh"><span class="zdot" style="--c:${zc}"></span><span class="sa">${esc(g.area)}</span>
+        <button class="switch" role="switch" aria-checked="${g.active}" data-act="streamtoggle" data-k="${esc(g.key)}" aria-label="${esc(g.name)} active"><span class="sl">${g.active ? "Active" : "Inactive"}</span><span class="tr"><i></i></span></button></div>
       <h3>${esc(g.name)}</h3>
       ${nx ? `<button class="snext" data-act="peek" data-id="${esc(nx.id)}"><span class="lb">${nx.today ? "On today" : "Next"}</span><span class="tx">${esc(step ? step.t : nx.title)}</span>${step ? `<span class="of">${esc(nx.title)}</span>` : ""}</button>` : ""}
       ${more.length ? `<div class="smore">${(showAll ? more : more.slice(0, 2)).map(it => `<button class="sitem" data-act="peek" data-id="${esc(it.id)}">${statusIcon(it).replace(/width="24" height="24"/, 'width="18" height="18"')}<span>${esc(it.title)}</span></button>`).join("")}${more.length > 2 ? `<button class="linkbtn" data-act="streammore" data-k="${esc(g.key)}">${showAll ? "Show less" : `+${more.length - 2} more`}</button>` : ""}</div>` : ""}
       <div class="sf"><span>${g.cards.length} open</span>${g.done ? `<span>${g.done} done this week</span>` : ""}${g.who ? `<span>with ${esc(g.who)}</span>` : ""}${g.due ? `<span class="${g.due < dayKey() ? "late" : ""}">due ${fmtDue(g.due).toLowerCase()}</span>` : ""}<span class="ago">${g.ago}</span></div>
     </section>`;
   };
-  return summary + `<div class="streams">${ss.map(tile).join("")}</div>`;
+  const on = ss.filter(g => g.active), off = ss.filter(g => !g.active);
+  return (on.length ? `<div class="streams">${on.map(tile).join("")}</div>` : `<div class="empty" style="margin-bottom:20px">Nothing marked active. Tap a switch to show what you're working on.</div>`) +
+    (off.length ? `<div class="ph" style="margin-top:22px"><h3>Inactive</h3><span class="n">${off.length}</span></div><div class="streams">${off.map(tile).join("")}</div>` : "");
 }
+
+/* auto-arrange: tiles pack into columns with no gaps (grid rows of 4px, each tile spans its height),
+   and glide to their new spot when the order changes */
+function packTiles() {
+  document.querySelectorAll(".streams").forEach(g => {
+    const gap = 16, row = 4;
+    g.querySelectorAll(".stream").forEach(t => { t.style.gridRowEnd = "auto"; const h = t.getBoundingClientRect().height; t.style.gridRowEnd = `span ${Math.ceil((h + gap) / (row + gap))}`; });
+  });
+}
+function tilePos() { const m = {}; document.querySelectorAll(".stream[data-k]").forEach(t => m[t.dataset.k] = t.getBoundingClientRect()); return m; }
+function flip(before) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  document.querySelectorAll(".stream[data-k]").forEach(t => {
+    const a = before[t.dataset.k]; if (!a) return;
+    const b = t.getBoundingClientRect(), dx = a.left - b.left, dy = a.top - b.top;
+    if (!dx && !dy) return;
+    t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: 380, easing: "cubic-bezier(.2,.8,.2,1)" });
+  });
+}
+window.addEventListener("resize", () => { if (view === "now") packTiles(); });
 
 /* ============================ VIEWS: SETUP ============================ */
 function viewSetup() {
@@ -807,6 +821,7 @@ document.addEventListener("click", e => {
     case "step": { const it = items.find(i => i.id === peekId); const st = (it.steps || []).map(s => ({ ...s })); st[+el.dataset.i].done = !st[+el.dataset.i].done; save(peekId, { steps: st, touchedAt: nowIso() }); break; }
     case "delstep": { const it = items.find(i => i.id === peekId); save(peekId, { steps: (it.steps || []).filter((_, i) => i !== +el.dataset.i) }); break; }
     case "peekfocus": { const pid = peekId; closePeek(); if (!items.find(i => i.id === pid).today) addToday(pid); focusId = pid; setMode("focus"); break; }
+    case "streamtoggle": { const k = el.dataset.k, on = !(streamState[k] && streamState[k].active); streamState[k] = { active: on, at: nowIso() }; cacheLocal(); render(); enqueue({ t: "sset", id: k, doc: streamState[k] }); break; }
     case "streammore": { const k = el.dataset.k; openStreams[k] = !openStreams[k]; render(); break; }
     case "peekdelete": { const it = items.find(i => i.id === peekId); $("#cMsg").textContent = `Delete "${it.title}" for good? "Let it go" keeps it in Done instead.`; $("#confirm").classList.add("open"); break; }
     case "cno": closeModal("#confirm"); break;
@@ -913,7 +928,7 @@ setInterval(() => {
   const m = currentMode(); if (m !== lastMode) { lastMode = m; render(); }
 }, 15000);
 render();
-items = recall("cache", []); habits = recall("hcache", {}); loaded = items.length > 0; render();
+items = recall("cache", []); habits = recall("hcache", {}); streamState = recall("scache", {}); loaded = items.length > 0; render();
 if (gh.token) { poll().then(render); }
 setInterval(poll, POLL_MS);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") poll(true).then(render); });
