@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Brain Desk">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0D0E10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FBFBFC" media="(prefers-color-scheme: light)">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="manifest" href="manifest.json">
+<title>Brain Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..650&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side" aria-label="Navigation"></aside>
+  <main class="main">
+    <header class="top" id="top"></header>
+    <div class="body" id="body"></div>
+  </main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="peek" id="peek" aria-label="Card details">
+  <div class="pk-h" id="pkHead"></div>
+  <div class="pk-b">
+    <textarea id="pkTitle" rows="2" aria-label="Title"></textarea>
+    <div class="props">
+      <span class="k">Status</span><div class="seg" id="pkStatus"></div>
+      <span class="k">Today</span><div class="seg" id="pkToday"></div>
+      <span class="k">Zone</span><div class="seg" id="pkZone"></div>
+      <span class="k">Kind</span><div class="seg" id="pkKind"></div>
+      <span class="k">Size</span><div class="seg" id="pkSize"></div>
+      <span class="k">Energy</span><div class="seg" id="pkEnergy"></div>
+      <label class="k" for="pkProj">Project</label><input class="field" id="pkProj" type="text" placeholder="Zoca">
+      <label class="k" for="pkDue">Due</label><input class="field" id="pkDue" type="date">
+    </div>
+    <div>
+      <div class="sect">Tiny next steps</div>
+      <div class="steps" id="pkSteps"></div>
+      <form class="addstep" id="stepForm" autocomplete="off"><input class="field" id="stepIn" type="text" placeholder="Something you could start in 2 minutes" aria-label="New step"><button class="btn" type="submit">Add</button></form>
+    </div>
+    <div>
+      <label class="sect" for="pkNotes" style="display:block">Notes</label>
+      <textarea class="field" id="pkNotes" rows="5" placeholder="Anything spinning in your head about it"></textarea>
+    </div>
+  </div>
+  <div class="pk-f">
+    <button class="btn primary" data-act="peekfocus">Focus on this</button>
+    <button class="btn bad" data-act="peekdelete">Delete</button>
+  </div>
+</aside>
+
+<div class="modal" id="dump" role="dialog" aria-label="Dump thoughts">
+  <div class="mbox">
+    <textarea id="dumpTxt" placeholder="What's on your mind? One thought per line." aria-label="Thoughts"></textarea>
+    <div class="mfoot">
+      <div class="seg" id="dumpZones"></div>
+      <span class="hint">⌘↵ to save</span>
+      <button class="btn" data-act="dumpcancel">Cancel</button>
+      <button class="btn primary" data-act="dumpsave">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="confirm" role="dialog" aria-label="Confirm delete">
+  <div class="cbox"><p id="cMsg"></p><div class="acts"><button class="btn" data-act="cno">Keep it</button><button class="btn primary" data-act="cyes">Delete</button></div></div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>

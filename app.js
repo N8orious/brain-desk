@@ -1,0 +1,675 @@
+/* Brain Desk — app
+   Data: one JSON file (items.json) in a private GitHub repo, read and written with the GitHub API.
+   Claude edits the same file with git, so chats and scheduled tasks stay in sync.
+   Edit CONFIG to change zones, modes, the schedule or where data lives. */
+(() => {
+"use strict";
+
+/* ============================ CONFIG ============================ */
+const ZONES = [
+  { id: "inbox",  name: "Brain dump", color: "var(--z-inbox)" },
+  { id: "work",   name: "Work",       color: "var(--z-work)" },
+  { id: "builds", name: "Builds",     color: "var(--z-builds)" },
+  { id: "life",   name: "Life",       color: "var(--z-life)" },
+];
+const WEEKDAYS = [1, 2, 3, 4, 5], WEEKEND = [0, 6], ALL = [0, 1, 2, 3, 4, 5, 6];
+// Modes switch on schedule (first match in PRIORITY wins). Any mode can be turned on by hand
+// until the next scheduled change, like an iOS Focus.
+const MODES = [
+  { id: "plan",     name: "Plan",         icon: "sun",     tint: "var(--m-plan)",  when: [{ days: WEEKDAYS, from: "08:00", to: "10:30" }],
+    line: "Pick three. Everything else can wait." },
+  { id: "focus",    name: "Deep work",    icon: "target",  tint: "var(--m-focus)", when: [{ days: WEEKDAYS, from: "10:30", to: "18:30" }],
+    line: "One thing on screen. Builds and life are hidden till 7:30." },
+  { id: "low",      name: "Low battery",  icon: "battery", tint: "var(--m-low)",   when: [],
+    line: "Small wins only. Anything counts." },
+  { id: "shutdown", name: "Shutdown",     icon: "sunset",  tint: "var(--m-shut)",  when: [{ days: WEEKDAYS, from: "18:30", to: "19:30" }],
+    line: "Tick, empty your head, set tomorrow. Then you're off." },
+  { id: "reset",    name: "Sunday reset", icon: "refresh", tint: "var(--m-reset)", when: [{ days: [0], from: "17:00", to: "20:00" }],
+    line: "See the week. Rescue what went quiet." },
+  { id: "free",     name: "Free time",    icon: "spark",   tint: "var(--m-free)",  when: [{ days: WEEKDAYS, from: "19:30", to: "23:30" }, { days: WEEKEND, from: "09:00", to: "23:30" }],
+    line: "Work is closed. Builds and life only." },
+  { id: "sleep",    name: "Wind down",    icon: "moon",    tint: "var(--m-sleep)", when: [{ days: ALL, from: "23:30", to: "24:00" }, { days: WEEKDAYS, from: "00:00", to: "08:00" }, { days: WEEKEND, from: "00:00", to: "09:00" }],
+    line: "Tomorrow is set. Nothing to do now." },
+];
+const PRIORITY = ["reset", "plan", "focus", "shutdown", "free", "sleep"];
+const DATA = { owner: "N8orious", repo: "brain-desk-data", path: "items.json", branch: "main" };
+const POLL_MS = 30000;
+const STALE_DAYS = 14;
+const FOCUS_MIN = 25;
+
+/* ============================ HELPERS ============================ */
+const MODE = Object.fromEntries(MODES.map(m => [m.id, m]));
+const ZONE = Object.fromEntries(ZONES.map(z => [z.id, z]));
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pad = n => String(n).padStart(2, "0");
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const addDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return dayKey(d); };
+const dayOf = iso => iso ? dayKey(new Date(iso)) : "";
+const nowIso = () => new Date().toISOString();
+const ago = iso => iso ? Math.floor((Date.now() - Date.parse(iso)) / 864e5) : 0;
+const mins = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+const t12 = t => { let [h, m] = t.split(":").map(Number); if (h === 24) h = 0; const ap = h >= 12 ? "pm" : "am"; h = h % 12 || 12; return m ? `${h}:${pad(m)}${ap}` : `${h}${ap}`; };
+const store = (k, v) => { try { localStorage.setItem("bd2:" + k, JSON.stringify(v)); } catch (e) {} };
+const recall = (k, d) => { try { const v = localStorage.getItem("bd2:" + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
+const zoneOf = it => ZONE[it.zone] || ZONE.inbox;
+
+const P = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
+  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
+  battery: '<rect x="2.5" y="7" width="16.5" height="10" rx="2.5"/><path d="M21.5 10.5v3M6 10.5v3"/>',
+  sunset: '<path d="M3 17h18M6.5 17a5.5 5.5 0 0 1 11 0M12 3.5v4M9.5 6 12 3.5 14.5 6M4.5 10.5l1.4 1M19.5 10.5l-1.4 1M7 21h10"/>',
+  refresh: '<path d="M19.5 11A7.5 7.5 0 0 0 6 6.5L4 8.5M4 4v4.5h4.5M4.5 13A7.5 7.5 0 0 0 18 17.5l2-2M20 20v-4.5h-4.5"/>',
+  spark: '<path d="M12 3.5 13.8 9 19.5 10.5 13.8 12.2 12 18 10.2 12.2 4.5 10.5 10.2 9z"/><path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  moon: '<path d="M19.5 14.5A8 8 0 1 1 9.5 4.5a6.5 6.5 0 0 0 10 10z"/>',
+  now: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>',
+  board: '<rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="10.5" y="4" width="5" height="11" rx="1.5"/><rect x="17.5" y="4" width="3" height="7" rx="1.2"/>',
+  check: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  play: '<path d="M8 5.5v13l10-6.5z" fill="currentColor" stroke="none"/>',
+  pause: '<path d="M8.5 5.5v13M15.5 5.5v13"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  dump: '<path d="M4 13.5h4.5l1.5 2.5h4l1.5-2.5H20"/><path d="M6 5h12l2 8.5V19H4v-5.5z"/>',
+};
+const ico = (n, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
+function statusIcon(it) {
+  if (it.status === "done") return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--accent)"/><path d="m5 8.3 2 2 4-4.5" fill="none" stroke="var(--accent-ink)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (it.status === "dropped") return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="var(--text-3)" stroke-width="1.5"/><path d="M4 12 12 4" stroke="var(--text-3)" stroke-width="1.5"/></svg>`;
+  if (it.today) return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="var(--m-focus)" stroke-width="1.5"/><path d="M8 3.5a4.5 4.5 0 0 1 0 9z" fill="var(--m-focus)"/></svg>`;
+  return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+}
+
+/* ============================ STATE ============================ */
+let items = [], loaded = false;
+let view = recall("view", "now");
+let gh = { owner: recall("owner", DATA.owner), repo: recall("repo", DATA.repo), token: recall("token", "") };
+let override = recall("override", null);
+let peekId = null, focusId = null;
+const timer = { left: FOCUS_MIN * 60, total: FOCUS_MIN * 60, run: null };
+
+/* ============================ MODES ============================ */
+function scheduled(d = new Date()) {
+  const day = d.getDay(), m = d.getHours() * 60 + d.getMinutes();
+  for (const id of PRIORITY) if (MODE[id].when.some(w => w.days.includes(day) && m >= mins(w.from) && m < mins(w.to))) return id;
+  return "free";
+}
+function nextChange() {
+  const s = scheduled(), t0 = Date.now();
+  for (let i = 1; i <= 24 * 12; i++) { const t = new Date(t0 + i * 300000); if (scheduled(t) !== s) { t.setMinutes(Math.floor(t.getMinutes() / 5) * 5, 0, 0); return t.getTime(); } }
+  return t0 + 864e5;
+}
+function currentMode() {
+  if (override && override.until > Date.now()) return override.id;
+  if (override) { override = null; store("override", null); }
+  return scheduled();
+}
+function setMode(id) {
+  if (id === scheduled()) override = null;
+  else override = { id, until: nextChange() };
+  store("override", override); view = "now"; store("view", view); render();
+}
+function whenLabel(m) {
+  if (!m.when.length) return "By hand";
+  const w = m.when[0]; return `${t12(w.from)}–${t12(w.to)}`;
+}
+
+/* ============================ DERIVED ============================ */
+const isOpen = it => !it.status || it.status === "open";
+const openItems = () => items.filter(isOpen);
+const inZone = z => openItems().filter(it => (it.zone || "inbox") === z);
+const todays = () => openItems().filter(it => it.today).sort((a, b) => (a.todayRank ?? 9) - (b.todayRank ?? 9));
+const carried = it => it.today && it.todayDate && it.todayDate < dayKey();
+const doneOn = k => items.filter(it => it.status === "done" && dayOf(it.doneAt) === k);
+const touched = it => it.touchedAt || it.updatedAt || it.createdAt;
+const isStale = it => isOpen(it) && !it.today && ago(touched(it)) >= STALE_DAYS;
+const isEasy = it => it.size === "S" || it.energy === "low";
+const stepsLeft = it => (it.steps || []).filter(s => !s.done);
+function weekStats() {
+  const n = new Date(), dow = (n.getDay() + 6) % 7, mon = new Date(n); mon.setHours(0, 0, 0, 0); mon.setDate(n.getDate() - dow);
+  const counts = [0, 0, 0, 0, 0, 0, 0], list = [];
+  items.forEach(it => { if (it.status === "done" && it.doneAt) { const i = Math.floor((new Date(it.doneAt) - mon) / 864e5); if (i >= 0 && i < 7) { counts[i]++; list.push(it); } } });
+  return { counts, dow, total: list.length, list };
+}
+function suggestions(n = 6, opts = {}) {
+  const t = dayKey(), soon = addDays(2), wk = WEEKDAYS.includes(new Date().getDay());
+  const score = it => {
+    let s = 0;
+    if (it.due && it.due <= t) s += 100; else if (it.due && it.due <= soon) s += 50;
+    if (wk && it.zone === "work") s += 20;
+    if (opts.notWork && it.zone === "work") s -= 200;
+    if (isEasy(it)) s += 6;
+    if (isStale(it)) s += 4;
+    if (ago(touched(it)) <= 1) s += 2;
+    if ((it.zone || "inbox") === "inbox") s -= 5;
+    return s;
+  };
+  return openItems().filter(it => !it.today).sort((a, b) => score(b) - score(a)).slice(0, n);
+}
+function fmtDue(d) {
+  const t = dayKey(); if (d === t) return "Today";
+  const diff = Math.round((new Date(d + "T00:00") - new Date(t + "T00:00")) / 864e5);
+  if (diff === 1) return "Tomorrow"; if (diff < 0) return `${-diff}d late`; if (diff < 7) return new Date(d + "T00:00").toLocaleString("en", { weekday: "short" });
+  const dt = new Date(d + "T00:00"); return `${dt.getDate()} ${dt.toLocaleString("en", { month: "short" })}`;
+}
+
+/* ============================ STORAGE (GitHub) ============================
+   Every change is queued as an op, then applied to the freshest copy of items.json and
+   committed. If someone else (Claude, another device) committed first, we re-read and retry. */
+let fileSha = null, etag = null, queue = [], flushing = false, flushT = null, syncState = "idle";
+const enc = str => { const b = new TextEncoder().encode(str); let o = ""; for (let i = 0; i < b.length; i += 0x8000) o += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(o); };
+const dec = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\n/g, "")), c => c.charCodeAt(0)));
+const ghUrl = () => `https://api.github.com/repos/${encodeURIComponent(gh.owner)}/${encodeURIComponent(gh.repo)}/contents/${DATA.path}`;
+const ghHeaders = extra => Object.assign({ Authorization: "Bearer " + gh.token, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }, extra || {});
+const toList = data => Object.entries((data && data.items) || {}).map(([id, d]) => Object.assign({ id }, d));
+async function readFile(useEtag) {
+  const r = await fetch(ghUrl() + "?ref=" + DATA.branch + "&t=" + Date.now(), { headers: ghHeaders(useEtag && etag ? { "If-None-Match": etag } : null), cache: "no-store" });
+  if (r.status === 304) return null;
+  if (r.status === 404) return { data: { items: {} }, sha: null };
+  if (!r.ok) throw Object.assign(new Error("GitHub " + r.status), { status: r.status });
+  etag = r.headers.get("ETag");
+  const j = await r.json();
+  return { data: JSON.parse(dec(j.content) || "{}"), sha: j.sha };
+}
+function applyOps(data, ops) {
+  data.items = data.items || {};
+  ops.forEach(op => {
+    if (op.t === "create") data.items[op.id] = op.doc;
+    else if (op.t === "delete") delete data.items[op.id];
+    else if (op.t === "patch" && data.items[op.id]) {
+      const d = data.items[op.id];
+      Object.entries(op.patch).forEach(([k, v]) => { if (v === null || v === undefined) delete d[k]; else d[k] = v; });
+    }
+  });
+  return data;
+}
+function enqueue(op) { queue.push(op); setSync("saving"); clearTimeout(flushT); flushT = setTimeout(flush, 700); }
+async function flush() {
+  if (flushing || !queue.length || !gh.token) return;
+  flushing = true;
+  const ops = queue.slice(), msg = commitMsg(ops);
+  try {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const f = await readFile(false);
+      const data = applyOps(f.data, ops);
+      const body = { message: msg, content: enc(JSON.stringify(data, null, 1) + "\n"), branch: DATA.branch };
+      if (f.sha) body.sha = f.sha;
+      const r = await fetch(ghUrl(), { method: "PUT", headers: ghHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(body) });
+      if (r.ok) {
+        const j = await r.json(); fileSha = j.content.sha; etag = null;
+        queue = queue.slice(ops.length);
+        if (!queue.length) { items = toList(data); cacheLocal(); render(); }
+        setSync("saved"); break;
+      }
+      if (r.status !== 409 && r.status !== 422) throw new Error("GitHub " + r.status);
+      await new Promise(res => setTimeout(res, 300 + Math.random() * 600));
+      if (attempt === 3) throw new Error("conflict");
+    }
+  } catch (e) { console.warn(e); setSync("error"); toast("Couldn't save to GitHub. Will retry."); setTimeout(flush, 15000); }
+  flushing = false;
+  if (queue.length) flush();
+}
+function commitMsg(ops) {
+  const op = ops[0], t = op.t === "create" ? op.doc.title : (items.find(i => i.id === op.id) || {}).title || op.id;
+  const verb = op.t === "create" ? "add" : op.t === "delete" ? "delete" : op.patch.status === "done" ? "done" : op.patch.status === "dropped" ? "drop" : op.patch.today === true ? "today" : "edit";
+  return `desk: ${verb} ${t}`.slice(0, 72) + (ops.length > 1 ? ` (+${ops.length - 1})` : "");
+}
+async function poll() {
+  if (!gh.token || flushing || queue.length || document.visibilityState === "hidden") return;
+  try {
+    const f = await readFile(true);
+    if (f && !queue.length) { fileSha = f.sha; items = toList(f.data); cacheLocal(); if (!drag || !drag.started) render(); }
+    loaded = true; if (syncState === "error") setSync("saved");
+  } catch (e) { if (e.status === 401 || e.status === 403 || e.status === 404) { setSync("auth"); render(); } else setSync("error"); }
+}
+function cacheLocal() { store("cache", items); }
+function setSync(s) { syncState = s; const el = $("#sync"); if (el) { el.dataset.s = s; el.title = { idle: "", saving: "Saving to GitHub…", saved: "Saved to GitHub", error: "Offline. Changes will sync when you're back.", auth: "GitHub access needs fixing" }[s] || ""; } }
+
+/* ============================ WRITES ============================ */
+function save(id, patch) {
+  const it = items.find(i => i.id === id); if (!it) return;
+  patch.updatedAt = nowIso();
+  Object.entries(patch).forEach(([k, v]) => { if (v === null || v === undefined) delete it[k]; else it[k] = v; });
+  render(); cacheLocal(); enqueue({ t: "patch", id, patch: Object.assign({}, patch) });
+}
+function create(data) {
+  const id = "i" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), t = nowIso();
+  const doc = Object.assign({ title: "", zone: "inbox", kind: "task", size: "", energy: "", project: "", due: "", notes: "", steps: [], status: "open", today: false, createdAt: t, updatedAt: t, touchedAt: t, source: "app" }, data);
+  items.push(Object.assign({ id }, doc)); cacheLocal(); enqueue({ t: "create", id, doc });
+  return id;
+}
+function remove(id) { items = items.filter(i => i.id !== id); render(); cacheLocal(); enqueue({ t: "delete", id }); }
+const snap = id => { const it = items.find(i => i.id === id); return it && { status: it.status || "open", doneAt: it.doneAt || null, droppedAt: it.droppedAt || null, today: !!it.today, todayRank: it.todayRank ?? null, todayDate: it.todayDate || "", touchedAt: it.touchedAt || null }; };
+function rerank() { todays().forEach((it, i) => { if (it.todayRank !== i + 1) save(it.id, { todayRank: i + 1 }); }); }
+function markDone(id) {
+  const b = snap(id); if (!b) return;
+  if (b.status !== "open") { save(id, { status: "open", doneAt: null, droppedAt: null, touchedAt: nowIso() }); toast("Reopened."); return; }
+  save(id, { status: "done", doneAt: nowIso(), today: false, todayRank: null, touchedAt: nowIso() }); rerank();
+  if (focusId === id) focusId = null;
+  toast(`Done. ${weekStats().total} this week.`, () => { save(id, b); rerank(); });
+}
+function dropIt(id) {
+  const b = snap(id); if (!b) return;
+  save(id, { status: "dropped", droppedAt: nowIso(), today: false, todayRank: null }); rerank();
+  if (focusId === id) focusId = null;
+  toast("Let go.", () => { save(id, b); rerank(); });
+}
+function keepIt(id) { save(id, { touchedAt: nowIso(), todayDate: dayKey() }); toast("Kept."); }
+function addToday(id, date = dayKey()) {
+  const it = items.find(i => i.id === id); if (!it || it.today) return;
+  const t = todays(); if (t.length >= 3) { toast("Three is the limit. Finish or remove one first."); return; }
+  save(id, { today: true, todayRank: t.length + 1, todayDate: date, touchedAt: nowIso() });
+}
+function removeToday(id) { save(id, { today: false, todayRank: null }); rerank(); }
+function closeDay() {
+  const tm = addDays(1);
+  todays().forEach(it => save(it.id, { todayDate: tm }));
+  override = { id: "free", until: nextChange() }; store("override", override);
+  toast("Day closed. See you tomorrow."); render();
+}
+
+/* ============================ RENDER: SHELL ============================ */
+function render() {
+  const mode = currentMode();
+  renderSide(mode); renderTop(mode); renderBody(mode);
+  if (peekId) fillPeek(false);
+}
+function renderSide(mode) {
+  const w = weekStats(), max = Math.max(1, ...w.counts);
+  const navItem = (id, icon, label, cnt) => `<button class="nav" data-act="view" data-v="${id}" aria-current="${view === id}" title="${label}"><span class="ic">${ico(icon)}</span><span class="lbl">${label}</span><span class="cnt">${cnt ?? ""}</span></button>`;
+  let h = `<div class="brand"><span class="logo">${ico("spark", 13)}</span><span class="lbl">Brain Desk</span></div>
+    <button class="dumpbtn" data-act="dump" title="Dump a thought (N)">${ico("plus")}<span class="lbl">Dump a thought</span><kbd>N</kbd></button>
+    ${navItem("now", "now", "Now", todays().length ? todays().length + "/3" : "")}
+    ${navItem("board", "board", "Board", openItems().length)}
+    ${navItem("done", "check", "Done", w.total || "")}
+    <div class="navlabel"><span class="lbl">Modes</span><span class="lbl">${override ? "Manual" : "Auto"}</span></div>`;
+  MODES.forEach(m => {
+    const on = m.id === mode;
+    h += `<button class="nav" data-act="mode" data-m="${m.id}" aria-current="${on && view === "now"}" style="--ic:${m.tint}" title="${m.name}"><span class="ic">${ico(m.icon)}</span><span class="lbl">${m.name}</span>${on ? `<span class="live"></span>` : `<span class="when">${whenLabel(m)}</span>`}</button>`;
+  });
+  if (override) h += `<button class="nav back" data-act="auto" title="Back to schedule">${ico("undo")}<span class="lbl">Back to schedule</span></button>`;
+  h += `<button class="nav" data-act="view" data-v="settings" aria-current="${view === "settings"}" title="GitHub sync" style="margin-top:auto"><span class="ic"><span class="sync" id="sync" data-s="${syncState}"></span></span><span class="lbl">Sync</span></button>`;
+  h += `<div class="sidefoot" style="margin-top:0"><div class="bars">${w.counts.map((c, i) => `<i class="${c ? "on" : ""} ${i === w.dow ? "cur" : ""}" style="height:${3 + Math.round(c / max * 15)}px"></i>`).join("")}</div><span class="lbl">${w.total} done this week</span></div>`;
+  $("#side").innerHTML = h;
+}
+function renderTop(mode) {
+  const m = MODE[mode], d = new Date();
+  if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="modechip" style="--tint:var(--text-2)"><span class="mi">${ico("refresh", 18)}</span><div><h1>GitHub sync</h1><p>Where your desk is saved</p></div></div>`; return; }
+  const title = view === "now" ? m.name : view === "board" ? "Board" : "Done";
+  const line = view === "now" ? m.line : view === "board" ? "Everything open, by zone. Drag to move." : "What you finished and let go of.";
+  const icon = view === "now" ? m.icon : view === "board" ? "board" : "check";
+  const tint = view === "now" ? m.tint : "var(--text-2)";
+  const ov = override && view === "now" ? `<span class="override">On until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>` : "";
+  $("#top").innerHTML = `<div class="modechip" style="--tint:${tint}"><span class="mi">${ico(icon, 18)}</span><div style="min-width:0"><h1>${title}</h1><p>${esc(line)}</p></div></div>
+    <span class="sp"></span>${ov}
+    <div class="clock"><b id="clk">${d.toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</b><span>${d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "short" })}</span></div>`;
+}
+function renderBody(mode) {
+  const b = $("#body"); const y = b.scrollTop;
+  let h = loaded || items.length ? "" : `<div class="status">Loading your desk…</div>`;
+  if (!gh.token || syncState === "auth" || view === "settings") h = viewSetup();
+  else if (view === "board") h += viewBoard();
+  else if (view === "done") h += viewDone();
+  else h += ({ plan: vPlan, focus: vFocus, low: vLow, shutdown: vShutdown, reset: vReset, free: vFree, sleep: vSleep }[mode] || vFree)();
+  b.innerHTML = h; b.scrollTop = y;
+  if (view === "now" && mode === "focus") drawTimer();
+}
+
+/* ============================ RENDER: PARTS ============================ */
+function chips(it) {
+  const c = [];
+  const st = it.steps || []; if (st.length) c.push(`<span class="chip">${st.filter(s => s.done).length}/${st.length}</span>`);
+  if (it.due) { const f = fmtDue(it.due); c.push(`<span class="chip ${it.due < dayKey() ? "late" : it.due <= addDays(2) ? "due" : ""}">${f}</span>`); }
+  if (it.energy === "low") c.push(`<span class="chip low">Low</span>`);
+  if (isStale(it)) c.push(`<span class="chip zz" title="Untouched for ${ago(touched(it))} days">${ago(touched(it))}d quiet</span>`);
+  return c.join("");
+}
+function row(it, actions = "") {
+  return `<div class="row ${isOpen(it) ? "" : "isdone"}" data-act="peek" data-id="${esc(it.id)}">
+    <button class="st" data-act="done" data-id="${esc(it.id)}" aria-label="${isOpen(it) ? "Mark done" : "Reopen"}">${statusIcon(it)}</button>
+    <span class="tt">${esc(it.title)}</span>
+    <span class="meta">${chips(it)}</span>
+    <span class="proj">${esc(it.project || "")}</span>
+    <span class="zdot" style="--c:${zoneOf(it).color}" title="${zoneOf(it).name}"></span>
+    ${actions ? `<span class="ra">${actions}</span>` : ""}
+  </div>`;
+}
+const A = {
+  today: it => `<button class="btn sm" data-act="today" data-id="${esc(it.id)}" title="Add to today">${ico("plus", 14)}<span class="bl">Today</span></button>`,
+  tomorrow: it => `<button class="btn sm" data-act="tomorrow" data-id="${esc(it.id)}" title="Add to tomorrow">${ico("plus", 14)}<span class="bl">Tomorrow</span></button>`,
+  drop: (it, hov = true) => `<button class="btn sm icon ${hov ? "hov" : ""} bad" data-act="drop" data-id="${esc(it.id)}" aria-label="Let it go" title="Let it go">${ico("x", 14)}</button>`,
+  done: it => `<button class="btn sm good" data-act="done" data-id="${esc(it.id)}">Done</button>`,
+  keep: it => `<button class="btn sm" data-act="keep" data-id="${esc(it.id)}">Keep</button>`,
+  park: it => `<button class="btn sm" data-act="park" data-id="${esc(it.id)}">Park</button>`,
+  dropTxt: it => `<button class="btn sm bad" data-act="drop" data-id="${esc(it.id)}">Drop</button>`,
+  untoday: it => `<button class="btn sm icon" data-act="untoday" data-id="${esc(it.id)}" aria-label="Remove from today" title="Remove">${ico("x", 14)}</button>`,
+};
+function panel(title, n, body, extra = "") {
+  return `<section class="panel"><div class="ph"><h3>${title}</h3>${n !== "" && n != null ? `<span class="n">${n}</span>` : ""}${extra}</div><div class="pb">${body}</div></section>`;
+}
+const list = (arr, fn, empty) => arr.length ? arr.map(fn).join("") : `<div class="empty">${empty}</div>`;
+function slots(opts = {}) {
+  const t = todays(); let h = `<div class="slots">`;
+  for (let i = 0; i < 3; i++) {
+    const it = t[i];
+    if (!it) { h += `<div class="slot empty-slot"><span class="rk">${i + 1}</span><h4>${opts.emptyText || "Open slot. Add one from the right."}</h4><span></span></div>`; continue; }
+    const nx = stepsLeft(it)[0];
+    h += `<div class="slot" data-act="peek" data-id="${esc(it.id)}"><span class="rk">${i + 1}</span>
+      <div style="min-width:0"><h4>${esc(it.title)}</h4><div class="sub">${esc(it.project || zoneOf(it).name)}${nx ? " · next: " + esc(nx.t) : ""}</div>
+      ${carried(it) && opts.askCarried !== false ? `<div class="ask"><span class="dim" style="font-size:12px;align-self:center">From ${it.todayDate === addDays(-1) ? "yesterday" : "earlier"}.</span>${A.done(it)}<button class="btn sm" data-act="keep" data-id="${esc(it.id)}">Still on it</button>${A.dropTxt(it)}</div>` : ""}</div>
+      <div class="ra">${opts.slotActions ? opts.slotActions(it) : `<button class="btn sm icon" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done" title="Done">${ico("check", 15)}</button>${A.untoday(it)}`}</div></div>`;
+  }
+  return h + `</div>`;
+}
+
+/* ============================ VIEWS: MODES ============================ */
+function vPlan() {
+  const t = todays(), sug = suggestions(6), dump = inZone("inbox");
+  const left = `<section class="panel"><div class="ph"><h3>Today's three</h3><span class="n">${t.length}/3</span></div>${slots()}
+      <div style="padding:0 10px 12px;display:flex;gap:8px;align-items:center"><button class="btn primary lg" data-act="mode" data-m="focus">${ico("target", 15)}Start deep work</button><span class="dim" style="font-size:12px">Hides everything except these.</span></div></section>`;
+  const right = panel("Suggested", "", list(sug, it => row(it, A.today(it)), "Nothing waiting. Nice.")) +
+    `<div style="height:18px"></div>` +
+    panel("Brain dump", dump.length, list(dump.slice(0, 6), it => row(it, A.today(it) + A.drop(it)), "Empty. Press N whenever something pops up."));
+  return `<div class="grid g2">${left}<div>${right}</div></div>`;
+}
+function vFocus() {
+  const t = todays();
+  if (!t.length) return `<div class="grid g2">${panel("Nothing picked for today", "", `<div class="empty">Pick one thing to start with. Just one.</div>` + list(suggestions(5), it => row(it, A.today(it)), ""))}</div>`;
+  const cur = t.find(i => i.id === focusId) || t[0]; focusId = cur.id;
+  const nx = stepsLeft(cur)[0], idx = t.indexOf(cur);
+  const nowCard = `<section class="panel now">
+      <div class="eyebrow"><span class="dot"></span>Now · ${idx + 1} of ${t.length}</div>
+      <div><h2>${esc(cur.title)}</h2><div class="proj2">${esc(cur.project || zoneOf(cur).name)}${cur.due ? " · due " + fmtDue(cur.due).toLowerCase() : ""}</div></div>
+      <div class="nextstep"><span class="lb">Next step</span><span class="tx">${nx ? esc(nx.t) : "Do the first two minutes. That's all."}</span>${nx ? `<button class="btn sm" data-act="stepdone" data-id="${esc(cur.id)}" data-i="${(cur.steps || []).indexOf(nx)}">Done</button>` : `<button class="btn sm" data-act="peek" data-id="${esc(cur.id)}">Add steps</button>`}</div>
+      <div class="timer"><div class="ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="none" stroke="var(--line)" stroke-width="7"/><circle id="arc" cx="60" cy="60" r="54" fill="none" stroke="var(--m-focus)" stroke-width="7" stroke-linecap="round" stroke-dasharray="339.3" stroke-dashoffset="0"/></svg><div class="tm" id="tm">25:00</div></div>
+        <div class="tbtns"><button class="btn primary lg" data-act="timer" id="tbtn">${timer.run ? ico("pause", 15) + "Pause" : ico("play", 15) + (timer.left < timer.total ? "Resume" : `Start ${FOCUS_MIN} min`)}</button><button class="btn lg" data-act="plus5">+5 min</button><button class="btn lg good" data-act="done" data-id="${esc(cur.id)}">${ico("check", 15)}I did it</button></div></div>
+    </section>`;
+  const others = t.filter(i => i !== cur);
+  const work = inZone("work").filter(i => !i.today).slice(0, 8);
+  const side = panel("Up next", others.length, list(others, it => row(it, `<button class="btn sm" data-act="focuson" data-id="${esc(it.id)}">Switch</button>`), "That's the only one. Good.")) +
+    `<div style="height:18px"></div>` + panel("Work queue", work.length, list(work, it => row(it, A.today(it)), "Queue's clear.")) +
+    `<div class="note">${ico("moon", 14)}Builds and life are hidden till 7:30 pm. New thoughts go to the brain dump (N).</div>`;
+  return `<div class="focusgrid">${nowCard}<div>${side}</div></div>`;
+}
+function vLow() {
+  const easy = openItems().filter(isEasy).sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0)).slice(0, 12);
+  return `<div class="grid g2">${panel("Easy wins", easy.length, list(easy, it => row(it, (it.today ? "" : A.today(it)) + A.drop(it)), "No small tasks tagged. Open a card and set Size to 15 min or Energy to Low."))}
+    <div>${panel("Today's three", todays().length + "/3", slots({ askCarried: false }))}<div class="note">${ico("battery", 14)}Low energy is normal. One small thing done beats a big thing stared at.</div></div></div>`;
+}
+function vShutdown() {
+  const t = todays(), k = dayKey();
+  // cards worked on today (not dumped today) or with every step ticked: likely done but not marked
+  const maybe = openItems().filter(it => !it.today && ((dayOf(it.touchedAt) === k && dayOf(it.createdAt) !== k) || ((it.steps || []).length && !stepsLeft(it).length))).slice(0, 6);
+  const doneT = doneOn(k), dumpT = inZone("inbox").filter(it => dayOf(it.createdAt) === k);
+  const tick = [...t, ...maybe];
+  const c1 = panel("Tick what's done", "", `${list(tick, it => row(it, A.done(it) + A.dropTxt(it)), "Nothing open from today.")}${doneT.length ? `<div class="sect" style="padding:10px 8px 2px">Done today · ${doneT.length}</div>` + doneT.map(it => row(it)).join("") : ""}`, `<span class="step act">1</span>`);
+  const c2 = panel("Empty your head", "", `<div style="padding:8px"><button class="btn lg" style="width:100%" data-act="dump">${ico("dump", 15)}Dump everything</button><p class="dim" style="font-size:12.5px;margin:8px 2px 4px">One thought per line. It all lands in the brain dump. Sort it another day.</p></div>${dumpT.length ? `<div class="sect" style="padding:6px 8px 2px">Dumped today · ${dumpT.length}</div>` + dumpT.map(it => row(it)).join("") : ""}`, `<span class="step act">2</span>`);
+  const fill = 3 - t.length;
+  const c3 = panel("Set tomorrow", "", `${slots({ emptyText: "Open slot", askCarried: false, slotActions: it => A.untoday(it) })}
+      ${fill > 0 ? `<div class="sect" style="padding:0 10px">Fill ${fill} more</div>` + list(suggestions(4), it => row(it, A.tomorrow(it)), "") : ""}
+      <div style="padding:10px"><button class="btn primary lg" style="width:100%" data-act="closeday">${ico("moon", 15)}Close the day</button></div>`, `<span class="step act">3</span>`);
+  return `<div class="grid g3">${c1}${c2}${c3}</div>`;
+}
+function vFree() {
+  const workN = inZone("work").length;
+  const b = inZone("builds"), l = inZone("life");
+  const pick = [...b, ...l].filter(i => i.energy !== "high").slice(0, 1)[0] || b[0];
+  return `${pick ? `<section class="panel" style="margin-bottom:18px"><div class="ph"><h3>If you feel like it</h3><span class="n">no pressure</span></div><div class="pb">${row(pick)}</div></section>` : ""}
+    <div class="grid g22">${panel("Builds", b.length, list(b, it => row(it, A.drop(it)), "No builds on the desk."))}${panel("Life", l.length, list(l, it => row(it, A.drop(it)), "Nothing here."))}</div>
+    <div class="note">${ico("x", 14)}Work is closed. ${workN} work card${workN === 1 ? "" : "s"} will be there tomorrow.</div>`;
+}
+function vReset() {
+  const w = weekStats();
+  const quiet = openItems().filter(isStale).sort((a, b) => ago(touched(b)) - ago(touched(a))).slice(0, 8);
+  const dump = inZone("inbox");
+  const week = addDays(7), due = openItems().filter(it => it.due && it.due <= week).sort((a, b) => a.due.localeCompare(b.due));
+  const sortBtns = it => ZONES.filter(z => z.id !== "inbox").map(z => `<button class="btn sm" data-act="zone" data-z="${z.id}" data-id="${esc(it.id)}"><span class="zdot" style="--c:${z.color}"></span>${z.name}</button>`).join("");
+  const wins = `<section class="panel"><div class="statline"><span class="big">${w.total}</span><p>things done this week</p></div><div class="pb">${list(w.list.slice(0, 8), it => row(it), "A quiet week. That's allowed.")}</div></section>`;
+  return `<div class="grid g22">${wins}
+    ${panel("Gone quiet", quiet.length, list(quiet, it => row(it, A.done(it) + A.keep(it) + A.park(it) + A.dropTxt(it)), `Nothing untouched for ${STALE_DAYS}+ days.`))}
+    ${panel("Sort the brain dump", dump.length, list(dump, it => row(it, sortBtns(it)), "Brain dump is empty."))}
+    ${panel("Due in the next 7 days", due.length, list(due, it => row(it), "Nothing due."))}</div>`;
+}
+function vSleep() {
+  const t = todays();
+  return `<div class="sleep"><span class="moon">${ico("moon", 26)}</span><h2>${t.length ? "Tomorrow is set." : "Nothing set for tomorrow. That's fine."}</h2>
+    <p class="muted" style="margin:0">You can stop thinking about it now. It's all on the desk.</p>
+    ${t.length ? panel("Tomorrow's three", "", t.map(it => row(it)).join("")) : ""}
+    <button class="btn lg" data-act="dump">${ico("dump", 15)}Mind racing? Dump it here</button></div>`;
+}
+
+/* ============================ VIEWS: SETUP ============================ */
+function viewSetup() {
+  const bad = gh.token && syncState === "auth";
+  return `<div style="max-width:620px">${panel(gh.token && !bad ? "GitHub sync" : "Connect your desk", "", `<div style="padding:10px 10px 14px;display:flex;flex-direction:column;gap:14px">
+    <p class="muted" style="margin:0">Brain Desk saves your cards to a private GitHub repo, so Claude can update the same desk from chats and scheduled check-ins. Paste a token once on this device.</p>
+    ${bad ? `<p style="margin:0;color:var(--bad)">GitHub refused the token or can't find the repo. Check the details below.</p>` : ""}
+    <div class="props"><label class="k" for="ghOwner">GitHub user</label><input class="field" id="ghOwner" value="${esc(gh.owner)}" autocapitalize="off" autocorrect="off">
+      <label class="k" for="ghRepo">Data repo</label><input class="field" id="ghRepo" value="${esc(gh.repo)}" autocapitalize="off" autocorrect="off">
+      <label class="k" for="ghToken">Token</label><input class="field" id="ghToken" type="password" placeholder="github_pat_…" value="${esc(gh.token)}" autocapitalize="off" autocorrect="off"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary lg" data-act="connect">Connect</button>${gh.token ? `<button class="btn lg" data-act="disconnect">Forget token on this device</button>` : ""}${gh.token && !bad ? `<button class="btn lg ghost" data-act="view" data-v="now">Back</button>` : ""}</div>
+    <div class="sect" style="margin:6px 0 0">Make a token (2 minutes)</div>
+    <ol class="muted" style="margin:0;padding-left:18px;line-height:1.7;font-size:13px">
+      <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:var(--accent)">github.com/settings/personal-access-tokens/new</a></li>
+      <li>Name it "Brain Desk iPad", expiration: 1 year</li>
+      <li>Repository access: <b>Only select repositories</b> → ${esc(gh.repo)}</li>
+      <li>Permissions → Repository → <b>Contents: Read and write</b></li>
+      <li>Generate, copy, paste above</li>
+    </ol>
+    <p class="dim" style="margin:0;font-size:12px">The token stays on this device only. It can't touch any other repo.</p></div>`)}</div>`;
+}
+
+/* ============================ VIEWS: BOARD / DONE ============================ */
+function viewBoard() {
+  return `<div class="board" id="board">${ZONES.map(z => {
+    const arr = inZone(z.id).sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0) || (touched(b) || "").localeCompare(touched(a) || ""));
+    return `<div class="col" data-zone="${z.id}"><div class="colh"><span class="zdot" style="--c:${z.color}"></span><h3>${z.name}</h3><span class="n">${arr.length}</span><button class="btn sm icon ghost" data-act="dump" data-z="${z.id}" aria-label="Add to ${z.name}">${ico("plus", 15)}</button></div>
+      <div class="cards">${arr.map(it => `<div class="bcard" data-act="peek" data-id="${esc(it.id)}"><div class="bt"><button class="st" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done">${statusIcon(it)}</button><span class="tt">${esc(it.title)}</span></div>
+        <div class="bm">${it.project ? `<span class="proj">${esc(it.project)}</span>` : ""}${chips(it)}</div></div>`).join("") || `<div class="empty">Empty</div>`}</div></div>`;
+  }).join("")}</div>`;
+}
+function viewDone() {
+  const done = items.filter(it => it.status === "done" && it.doneAt && ago(it.doneAt) < 14).sort((a, b) => b.doneAt.localeCompare(a.doneAt));
+  const groups = {}; done.forEach(it => { const k = dayOf(it.doneAt); (groups[k] = groups[k] || []).push(it); });
+  const label = k => k === dayKey() ? "Today" : k === addDays(-1) ? "Yesterday" : new Date(k + "T00:00").toLocaleDateString("en", { weekday: "long", day: "numeric", month: "short" });
+  const dropped = items.filter(it => it.status === "dropped").sort((a, b) => (b.droppedAt || "").localeCompare(a.droppedAt || "")).slice(0, 20);
+  const left = Object.keys(groups).length ? Object.entries(groups).map(([k, arr]) => panel(label(k), arr.length, arr.map(it => row(it)).join(""))).join(`<div style="height:14px"></div>`) : panel("Done", "", `<div class="empty">Nothing finished in the last two weeks yet. Tick the circle on any card.</div>`);
+  return `<div class="grid g2"><div>${left}</div>${panel("Let go", dropped.length, list(dropped, it => row(it, `<button class="btn sm" data-act="restore" data-id="${esc(it.id)}">${ico("undo", 14)}Restore</button>`), "Nothing dropped."))}</div>`;
+}
+
+/* ============================ PEEK ============================ */
+const KINDS = [["task", "Task"], ["project", "Project"], ["idea", "Idea"], ["errand", "Errand"]];
+const SIZES = [["S", "15 min"], ["M", "1 hour"], ["L", "Big"]];
+const ENERGY = [["low", "Low"], ["high", "High"]];
+function openPeek(id) { peekId = id; fillPeek(true); $("#peek").classList.add("open"); $("#scrim").classList.add("open"); }
+function closePeek() { flushPeek(); peekId = null; $("#peek").classList.remove("open"); $("#scrim").classList.remove("open"); }
+let pkT = null;
+function flushPeek() { if (pkT) { clearTimeout(pkT); pkT = null; commitPeek(); } }
+function commitPeek() {
+  const it = items.find(i => i.id === peekId); if (!it) return;
+  const p = {}, t = $("#pkTitle").value.trim(), n = $("#pkNotes").value, pr = $("#pkProj").value.trim();
+  if (t && t !== it.title) p.title = t; if (n !== (it.notes || "")) p.notes = n; if (pr !== (it.project || "")) p.project = pr;
+  if (Object.keys(p).length) { p.touchedAt = nowIso(); save(peekId, p); }
+}
+const seg = (opts, val, key, toggle = true) => opts.map(([k, l]) => `<button type="button" data-act="prop" data-k="${key}" data-v="${k}" data-tg="${toggle ? 1 : 0}" aria-pressed="${k === val}">${l}</button>`).join("");
+function fillPeek(full) {
+  const it = items.find(i => i.id === peekId); if (!it) { closePeek(); return; }
+  const z = zoneOf(it);
+  $("#pkHead").innerHTML = `<span class="zdot" style="--c:${z.color}"></span><span>${z.name} · added ${new Date(it.createdAt || Date.now()).toLocaleDateString("en", { day: "numeric", month: "short" })}${it.source && it.source !== "canvas" ? " · by " + (it.source === "claude" ? "Claude" : esc(it.source)) : ""}</span><button class="btn sm icon ghost" data-act="closepeek" aria-label="Close">${ico("x", 16)}</button>`;
+  const ae = document.activeElement;
+  if (full || ae !== $("#pkTitle")) $("#pkTitle").value = it.title || "";
+  if (full || ae !== $("#pkNotes")) $("#pkNotes").value = it.notes || "";
+  if (full || ae !== $("#pkProj")) $("#pkProj").value = it.project || "";
+  $("#pkDue").value = it.due || "";
+  $("#pkStatus").innerHTML = seg([["open", "Open"], ["done", "Done"], ["dropped", "Let go"]], it.status || "open", "status", false);
+  $("#pkToday").innerHTML = seg([["yes", "On today"], ["no", "Not today"]], it.today ? "yes" : "no", "today", false);
+  $("#pkZone").innerHTML = seg(ZONES.map(z => [z.id, z.name]), it.zone || "inbox", "zone", false);
+  $("#pkKind").innerHTML = seg(KINDS, it.kind || "task", "kind", false);
+  $("#pkSize").innerHTML = seg(SIZES, it.size || "", "size");
+  $("#pkEnergy").innerHTML = seg(ENERGY, it.energy || "", "energy");
+  const st = it.steps || [];
+  $("#pkSteps").innerHTML = st.length ? st.map((s, i) => `<div class="srow ${s.done ? "done" : ""}"><button class="cb" data-act="step" data-i="${i}" aria-label="Toggle step">${ico("check", 12).replace('<circle cx="12" cy="12" r="8.5"/>', "")}</button><span>${esc(s.t)}</span><button class="btn sm icon ghost" data-act="delstep" data-i="${i}" aria-label="Remove step">${ico("x", 13)}</button></div>`).join("") : `<div class="dim" style="font-size:12.5px;padding:2px 4px 6px">Big or vague? Break off one piece you could start in two minutes.</div>`;
+}
+function onProp(k, v, tg) {
+  const it = items.find(i => i.id === peekId); if (!it) return;
+  if (k === "status") { if (v === "done") markDone(it.id); else if (v === "dropped") dropIt(it.id); else if (!isOpen(it)) markDone(it.id); return; }
+  if (k === "today") { v === "yes" ? addToday(it.id) : removeToday(it.id); return; }
+  const cur = it[k] || "";
+  save(it.id, { [k]: tg && cur === v ? "" : v, touchedAt: nowIso() });
+}
+
+/* ============================ DUMP MODAL ============================ */
+let dumpZone = "inbox";
+function openDump(z = "inbox") {
+  dumpZone = z; $("#dumpTxt").value = ""; renderDumpZones(); $("#dump").classList.add("open");
+  setTimeout(() => $("#dumpTxt").focus(), 30);
+}
+function renderDumpZones() { $("#dumpZones").innerHTML = ZONES.map(z => `<button type="button" data-act="dumpzone" data-z="${z.id}" aria-pressed="${z.id === dumpZone}">${z.name}</button>`).join(""); }
+function saveDump() {
+  const lines = $("#dumpTxt").value.split("\n").map(s => s.trim()).filter(Boolean); if (!lines.length) { closeModal("#dump"); return; }
+  lines.forEach(line => {
+    let zone = dumpZone; const m = line.match(/#(work|builds?|life|inbox|dump)\b/i);
+    if (m) { const k = m[1].toLowerCase(); zone = k.startsWith("build") ? "builds" : k === "dump" ? "inbox" : k; line = line.replace(m[0], "").replace(/\s{2,}/g, " ").trim(); }
+    if (line) create({ title: line.replace(/^[-*•]\s*/, ""), zone });
+  });
+  closeModal("#dump"); render();
+  toast(lines.length === 1 ? `Added to ${ZONE[dumpZone].name}.` : `${lines.length} thoughts out of your head.`);
+}
+const closeModal = s => $(s).classList.remove("open");
+
+/* ============================ TIMER ============================ */
+function drawTimer() {
+  const tm = $("#tm"), arc = $("#arc"); if (!tm) return;
+  tm.textContent = `${pad(Math.floor(timer.left / 60))}:${pad(timer.left % 60)}`;
+  arc.style.strokeDashoffset = 339.3 * (1 - timer.left / timer.total);
+}
+function toggleTimer() {
+  if (timer.run) { clearInterval(timer.run); timer.run = null; }
+  else timer.run = setInterval(() => {
+    timer.left--; drawTimer();
+    if (timer.left <= 0) { clearInterval(timer.run); timer.run = null; timer.left = timer.total = FOCUS_MIN * 60; toast("That's 25 minutes. Stretch, then go again or stop."); render(); }
+  }, 1000);
+  render();
+}
+
+/* ============================ TOAST ============================ */
+let tT = null;
+function toast(msg, undo) {
+  const t = $("#toast"); t.innerHTML = `<span>${esc(msg)}</span>`;
+  if (undo) { const b = document.createElement("button"); b.textContent = "Undo"; b.onclick = () => { undo(); t.classList.remove("show"); }; t.appendChild(b); }
+  t.classList.add("show"); clearTimeout(tT); tT = setTimeout(() => t.classList.remove("show"), undo ? 5000 : 2400);
+}
+
+/* ============================ EVENTS ============================ */
+let suppressClick = false;
+document.addEventListener("click", e => {
+  if (suppressClick) { suppressClick = false; e.preventDefault(); return; }
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const a = el.dataset.act, id = el.dataset.id;
+  switch (a) {
+    case "view": view = el.dataset.v; store("view", view); render(); break;
+    case "mode": setMode(el.dataset.m); break;
+    case "auto": override = null; store("override", null); view = "now"; render(); break;
+    case "dump": openDump(el.dataset.z || "inbox"); break;
+    case "dumpzone": dumpZone = el.dataset.z; renderDumpZones(); break;
+    case "dumpsave": saveDump(); break;
+    case "dumpcancel": closeModal("#dump"); break;
+    case "peek": openPeek(id); break;
+    case "closepeek": closePeek(); break;
+    case "done": markDone(id); break;
+    case "drop": dropIt(id); break;
+    case "keep": keepIt(id); break;
+    case "restore": save(id, { status: "open", droppedAt: null, touchedAt: nowIso() }); toast("Back on the desk."); break;
+    case "park": { const it = items.find(i => i.id === id); save(id, { touchedAt: nowIso(), notes: ((it.notes || "") + `\nParked ${dayKey()}`).trim() }); toast("Parked. Quiet for another two weeks."); break; }
+    case "today": addToday(id); break;
+    case "tomorrow": addToday(id, addDays(1)); break;
+    case "untoday": removeToday(id); break;
+    case "zone": save(id, { zone: el.dataset.z, rx: null, ry: null, touchedAt: nowIso() }); break;
+    case "focuson": focusId = id; save(id, { touchedAt: nowIso() }); break;
+    case "stepdone": { const it = items.find(i => i.id === id); const st = (it.steps || []).map(s => ({ ...s })); st[+el.dataset.i].done = true; save(id, { steps: st, touchedAt: nowIso() }); break; }
+    case "timer": toggleTimer(); break;
+    case "plus5": timer.left += 300; timer.total += 300; drawTimer(); break;
+    case "closeday": closeDay(); break;
+    case "connect": {
+      gh = { owner: $("#ghOwner").value.trim(), repo: $("#ghRepo").value.trim(), token: $("#ghToken").value.trim() };
+      store("owner", gh.owner); store("repo", gh.repo); store("token", gh.token);
+      syncState = "idle"; etag = null; view = "now"; store("view", view);
+      poll().then(() => { render(); if (syncState !== "auth") { toast("Connected. Your desk is synced."); flush(); } });
+      break;
+    }
+    case "disconnect": gh.token = ""; store("token", ""); render(); break;
+    case "prop": onProp(el.dataset.k, el.dataset.v, el.dataset.tg === "1"); break;
+    case "step": { const it = items.find(i => i.id === peekId); const st = (it.steps || []).map(s => ({ ...s })); st[+el.dataset.i].done = !st[+el.dataset.i].done; save(peekId, { steps: st, touchedAt: nowIso() }); break; }
+    case "delstep": { const it = items.find(i => i.id === peekId); save(peekId, { steps: (it.steps || []).filter((_, i) => i !== +el.dataset.i) }); break; }
+    case "peekfocus": { const pid = peekId; closePeek(); if (!items.find(i => i.id === pid).today) addToday(pid); focusId = pid; setMode("focus"); break; }
+    case "peekdelete": { const it = items.find(i => i.id === peekId); $("#cMsg").textContent = `Delete "${it.title}" for good? "Let it go" keeps it in Done instead.`; $("#confirm").classList.add("open"); break; }
+    case "cno": closeModal("#confirm"); break;
+    case "cyes": { const pid = peekId; closeModal("#confirm"); peekId = null; $("#peek").classList.remove("open"); $("#scrim").classList.remove("open"); remove(pid); toast("Deleted."); break; }
+  }
+});
+$("#scrim").addEventListener("click", closePeek);
+["#pkTitle", "#pkNotes", "#pkProj"].forEach(s => $(s).addEventListener("input", () => { clearTimeout(pkT); pkT = setTimeout(() => { pkT = null; commitPeek(); }, 700); }));
+$("#pkDue").addEventListener("change", () => save(peekId, { due: $("#pkDue").value || "", touchedAt: nowIso() }));
+$("#stepForm").addEventListener("submit", e => { e.preventDefault(); const v = $("#stepIn").value.trim(); if (!v) return; const it = items.find(i => i.id === peekId); save(peekId, { steps: [...(it.steps || []).map(s => ({ ...s })), { t: v, done: false }], touchedAt: nowIso() }); $("#stepIn").value = ""; });
+$("#dumpTxt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveDump(); } });
+document.addEventListener("keydown", e => {
+  const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
+  if (e.key === "Escape") { if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "n" || e.key === "N") { e.preventDefault(); openDump(); }
+  if (e.key === "1") { view = "now"; store("view", view); render(); }
+  if (e.key === "2") { view = "board"; store("view", view); render(); }
+  if (e.key === "3") { view = "done"; store("view", view); render(); }
+});
+
+/* board drag: mouse drags after 5px; touch needs a short press so scrolling still works */
+let drag = null;
+const bodyEl = $("#body");
+bodyEl.addEventListener("pointerdown", e => {
+  const c = e.target.closest(".bcard"); if (!c || e.target.closest("button")) return;
+  drag = { id: c.dataset.id, el: c, x: e.clientX, y: e.clientY, started: false, touch: e.pointerType !== "mouse", pid: e.pointerId };
+  if (drag.touch) drag.hold = setTimeout(() => startDrag(e.clientX, e.clientY), 260);
+});
+function startDrag(x, y) {
+  if (!drag) return; drag.started = true;
+  const r = drag.el.getBoundingClientRect(), g = drag.el.cloneNode(true);
+  g.classList.add("dragghost"); g.style.width = r.width + "px"; g.style.left = r.left + "px"; g.style.top = r.top + "px";
+  drag.dx = x - r.left; drag.dy = y - r.top; drag.ghost = g; document.body.appendChild(g); drag.el.classList.add("lifted");
+  if (navigator.vibrate) try { navigator.vibrate(8); } catch (e) {}
+}
+window.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const d = Math.hypot(e.clientX - drag.x, e.clientY - drag.y);
+  if (!drag.started) { if (drag.touch) { if (d > 8) { clearTimeout(drag.hold); drag = null; } return; } if (d < 5) return; startDrag(e.clientX, e.clientY); }
+  drag.ghost.style.left = (e.clientX - drag.dx) + "px"; drag.ghost.style.top = (e.clientY - drag.dy) + "px";
+  const col = document.elementFromPoint(e.clientX, e.clientY)?.closest(".col");
+  document.querySelectorAll(".col").forEach(c => c.classList.toggle("drop", c === col));
+});
+window.addEventListener("pointerup", e => {
+  if (!drag) return; clearTimeout(drag.hold);
+  if (drag.started) {
+    const col = document.elementFromPoint(e.clientX, e.clientY)?.closest(".col");
+    drag.ghost.remove(); drag.el.classList.remove("lifted"); document.querySelectorAll(".col.drop").forEach(c => c.classList.remove("drop"));
+    suppressClick = true; setTimeout(() => suppressClick = false, 50);
+    const it = items.find(i => i.id === drag.id);
+    if (col && it && col.dataset.zone !== it.zone) { save(it.id, { zone: col.dataset.zone, rx: null, ry: null, touchedAt: nowIso() }); toast(`Moved to ${ZONE[col.dataset.zone].name}.`); }
+  }
+  drag = null;
+});
+window.addEventListener("pointercancel", () => { if (drag) { clearTimeout(drag.hold); drag.ghost?.remove(); drag.el.classList.remove("lifted"); } drag = null; });
+document.addEventListener("touchmove", e => { if (drag && drag.started) e.preventDefault(); }, { passive: false });
+
+/* ============================ BOOT ============================ */
+let lastMode = currentMode();
+setInterval(() => {
+  const c = $("#clk"); if (c) c.textContent = new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" });
+  const m = currentMode(); if (m !== lastMode) { lastMode = m; render(); }
+}, 15000);
+render();
+items = recall("cache", []); loaded = items.length > 0; render();
+if (gh.token) { poll().then(render); }
+setInterval(poll, POLL_MS);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") poll(); });
+window.addEventListener("online", () => { flush(); poll(); });
+})();
