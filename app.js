@@ -111,7 +111,7 @@ function currentMode() {
 function setMode(id) {
   if (id === scheduled()) override = null;
   else override = { id, until: nextChange(), start: Date.now() };
-  store("override", override); view = "now"; store("view", view); render();
+  store("override", override); view = "today"; store("view", view); render();
 }
 function blockRange() {
   const now = Date.now(), m = currentMode();
@@ -327,7 +327,7 @@ function renderBar(mode) {
   const tab = (id, label, cnt) => `<button class="tab" role="tab" data-act="view" data-v="${id}" aria-selected="${view === id}">${label}${cnt ? `<span class="cnt">${cnt}</span>` : ""}</button>`;
   $("#bar").innerHTML = `<button class="modebtn glass" data-act="modes" style="--tint:${m.tint}" aria-label="Mode: ${m.name}. Change mode" aria-haspopup="dialog">
       <span class="mi">${ico(m.icon, 17)}</span><span class="nm">${m.name}</span>${override ? `<span class="live" title="Turned on by hand"></span>` : ""}<span class="chev">${ico("chev", 14)}</span></button>
-    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", t ? t + "/3" : "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
+    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? t + "/3" : "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
     <div class="bar-r"><span class="clock" id="clk">${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>
       <button class="iconbtn glass refresh" id="refreshBtn" data-act="refresh" aria-label="Refresh">${ico("refresh", 20)}<span class="sync" id="sync" data-s="${syncState}"></span></button>
       <button class="addbtn" data-act="dump" aria-label="Dump a thought (N)">${ico("plus", 22)}</button></div>`;
@@ -345,11 +345,11 @@ function renderTop(mode) {
   const m = MODE[mode], d = new Date();
   const date = d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long" });
   if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>GitHub sync</h1><p class="line">Where your desk is saved.</p></div>`; return; }
-  const title = view === "now" ? m.name : view === "board" ? "Board" : "Done";
-  const line = view === "now" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
-  const ov = override && view === "now" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
+  const title = view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "Board" : "Done";
+  const line = view === "now" ? `Everything you've got going. ${m.name}, ${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}.` : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
+  const ov = override && view === "today" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
   $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>${title}</h1><p class="line">${esc(line)}</p>${ov}</div>
-    ${view === "now" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
+    ${view === "today" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
 }
 function renderBodyWrap(mode) { renderBody(mode); updateTimeLeft(); }
 function renderBody(mode) {
@@ -358,9 +358,10 @@ function renderBody(mode) {
   if (!gh.token || syncState === "auth" || view === "settings") h = viewSetup();
   else if (view === "board") h += viewBoard();
   else if (view === "done") h += viewDone();
+  else if (view === "now") h += viewNow();
   else h += ({ plan: vPlan, focus: vFocus, low: vLow, shutdown: vShutdown, reset: vReset, free: vFree, sleep: vSleep }[mode] || vFree)();
   b.innerHTML = h; sc.scrollTop = y;
-  if (view === "now" && mode === "focus") drawTimer();
+  if (view === "today" && mode === "focus") drawTimer();
 }
 
 /* ============================ RENDER: PARTS ============================ */
@@ -563,6 +564,70 @@ function vSleep() {
     <button class="btn lg" data-act="dump">${ico("dump", 18)}Mind racing? Dump it here</button></div>`;
 }
 
+/* ============================ VIEW: NOW (live workstreams) ============================
+   Every thread he has going, as a wall of tiles: SUPR projects, his active side projects (rank 1-2) and life admin.
+   Status comes from activity: live (touched in the last 2 h or on today), moving, slowing, stalled.
+   SUPR streams dim outside weekday 10:30-7 (his rule: studio work only on weekdays). */
+const openStreams = {};
+const WHO = ["Agni", "Pani", "Harsh", "Rohan", "client", "brand team"];
+function workOpen(d = new Date()) { const day = d.getDay(), m = d.getHours() * 60 + d.getMinutes(); return day >= 1 && day <= 5 && m >= 630 && m < 1140; }
+function workBack(d = new Date()) {
+  const day = d.getDay(), m = d.getHours() * 60 + d.getMinutes();
+  if (day >= 1 && day <= 5 && m < 630) return "back at 10:30";
+  if (day >= 1 && day <= 4) return "back tomorrow 10:30";
+  return "back Monday 10:30";
+}
+const sideRank = it => { const r = parseInt(it.rank, 10); return r > 0 ? r : 99; };
+function streams() {
+  const open = openItems(), live = workOpen();
+  const activeSide = new Set(open.filter(it => it.zone === "builds" && sideRank(it) <= 2).map(it => it.project || it.title));
+  const groups = new Map();
+  const add = (k, meta, it) => { if (!groups.has(k)) groups.set(k, Object.assign({ key: k, cards: [] }, meta)); groups.get(k).cards.push(it); };
+  open.forEach(it => {
+    const z = it.zone || "inbox", pr = it.project || it.title;
+    if (z === "work") add("w:" + pr, { name: pr, area: "SUPR", zone: "work", order: 1 }, it);
+    else if (z === "builds" && (activeSide.has(pr) || it.today)) add("b:" + pr, { name: pr, area: sideRank(it) < 99 ? `Side project #${sideRank(it)}` : "Side project", zone: "builds", order: 2 + Math.min(sideRank(it), 9) / 10 }, it);
+    else if (z === "life") add("l:life", { name: "Life admin", area: "Life", zone: "life", order: 4 }, it);
+  });
+  const wk = weekStats(), mon = Date.now() - (wk.dow * 864e5) - 864e5;
+  const out = [...groups.values()].map(g => {
+    g.cards.sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0) || (a.todayRank ?? 9) - (b.todayRank ?? 9) || (a.due || "9").localeCompare(b.due || "9") || sideRank(a) - sideRank(b));
+    const all = items.filter(it => (g.zone === "life" ? it.zone === "life" : (it.project || it.title) === g.name && it.zone === g.zone));
+    const last = Math.max(...all.map(it => Date.parse(it.doneAt || "") || 0), ...g.cards.map(it => Date.parse(touched(it) || "") || 0));
+    const hrs = (Date.now() - last) / 36e5;
+    g.done = all.filter(it => it.status === "done" && Date.parse(it.doneAt || "") > mon).length;
+    g.today = g.cards.some(it => it.today);
+    g.closed = g.zone === "work" && !live;
+    g.status = g.closed ? "closed" : (hrs < 2 || (g.today && hrs < 8)) ? "live" : hrs < 48 ? "moving" : hrs < 24 * 7 ? "slowing" : "stalled";
+    g.ago = !last ? "" : hrs < 1 ? "just now" : hrs < 24 ? `${Math.round(hrs)}h ago` : `${Math.round(hrs / 24)}d ago`;
+    g.next = g.cards[0];
+    g.due = g.cards.map(it => it.due).filter(Boolean).sort()[0] || "";
+    g.who = WHO.find(w => g.cards.some(it => (it.title + " " + (it.notes || "")).toLowerCase().includes(w.toLowerCase()))) || "";
+    return g;
+  });
+  const rankSt = { live: 0, moving: 1, slowing: 2, stalled: 3, closed: 5 };
+  return out.sort((a, b) => rankSt[a.status] - rankSt[b.status] || a.order - b.order || a.name.localeCompare(b.name));
+}
+const ST = { live: "Live", moving: "Moving", slowing: "Slowing down", stalled: "Stalled", closed: "Closed" };
+function viewNow() {
+  const ss = streams();
+  if (!ss.length) return `<div class="empty">Nothing in motion. Add something with + or tell Task Master.</div>`;
+  const counts = ["live", "moving", "slowing", "stalled"].map(k => [k, ss.filter(s => s.status === k).length]).filter(x => x[1]);
+  const summary = `<div class="streamsum">${counts.map(([k, n]) => `<span class="pill ${k}"><i></i>${n} ${ST[k].toLowerCase()}</span>`).join("")}${ss.some(s => s.closed) ? `<span class="pill closed"><i></i>SUPR ${workBack()}</span>` : ""}</div>`;
+  const tile = g => {
+    const nx = g.next, step = nx ? stepsLeft(nx)[0] : null, more = g.cards.slice(1), showAll = openStreams[g.key];
+    const zc = ZONE[g.zone] ? ZONE[g.zone].color : "var(--text-3)";
+    return `<section class="stream st-${g.status}" style="--zc:${zc}">
+      <div class="sh"><span class="zdot" style="--c:${zc}"></span><span class="sa">${esc(g.area)}</span><span class="pill ${g.status}"><i></i>${g.closed ? workBack() : ST[g.status]}</span></div>
+      <h3>${esc(g.name)}</h3>
+      ${nx ? `<button class="snext" data-act="peek" data-id="${esc(nx.id)}"><span class="lb">${nx.today ? "On today" : "Next"}</span><span class="tx">${esc(step ? step.t : nx.title)}</span>${step ? `<span class="of">${esc(nx.title)}</span>` : ""}</button>` : ""}
+      ${more.length ? `<div class="smore">${(showAll ? more : more.slice(0, 2)).map(it => `<button class="sitem" data-act="peek" data-id="${esc(it.id)}">${statusIcon(it).replace(/width="24" height="24"/, 'width="18" height="18"')}<span>${esc(it.title)}</span></button>`).join("")}${more.length > 2 ? `<button class="linkbtn" data-act="streammore" data-k="${esc(g.key)}">${showAll ? "Show less" : `+${more.length - 2} more`}</button>` : ""}</div>` : ""}
+      <div class="sf"><span>${g.cards.length} open</span>${g.done ? `<span>${g.done} done this week</span>` : ""}${g.who ? `<span>with ${esc(g.who)}</span>` : ""}${g.due ? `<span class="${g.due < dayKey() ? "late" : ""}">due ${fmtDue(g.due).toLowerCase()}</span>` : ""}<span class="ago">${g.ago}</span></div>
+    </section>`;
+  };
+  return summary + `<div class="streams">${ss.map(tile).join("")}</div>`;
+}
+
 /* ============================ VIEWS: SETUP ============================ */
 function viewSetup() {
   const bad = gh.token && syncState === "auth";
@@ -699,7 +764,7 @@ document.addEventListener("click", e => {
     case "refresh": refreshNow(); break;
     case "modes": $("#modes").classList.contains("open") ? closeModes() : openModes(); break;
     case "mode": closeModes(); setMode(el.dataset.m); break;
-    case "auto": closeModes(); override = null; store("override", null); view = "now"; render(); break;
+    case "auto": closeModes(); override = null; store("override", null); view = "today"; render(); break;
     case "dump": openDump(el.dataset.z || "inbox"); break;
     case "dumpzone": dumpZone = el.dataset.z; renderDumpZones(); break;
     case "dumpsave": saveDump(); break;
@@ -742,6 +807,7 @@ document.addEventListener("click", e => {
     case "step": { const it = items.find(i => i.id === peekId); const st = (it.steps || []).map(s => ({ ...s })); st[+el.dataset.i].done = !st[+el.dataset.i].done; save(peekId, { steps: st, touchedAt: nowIso() }); break; }
     case "delstep": { const it = items.find(i => i.id === peekId); save(peekId, { steps: (it.steps || []).filter((_, i) => i !== +el.dataset.i) }); break; }
     case "peekfocus": { const pid = peekId; closePeek(); if (!items.find(i => i.id === pid).today) addToday(pid); focusId = pid; setMode("focus"); break; }
+    case "streammore": { const k = el.dataset.k; openStreams[k] = !openStreams[k]; render(); break; }
     case "peekdelete": { const it = items.find(i => i.id === peekId); $("#cMsg").textContent = `Delete "${it.title}" for good? "Let it go" keeps it in Done instead.`; $("#confirm").classList.add("open"); break; }
     case "cno": closeModal("#confirm"); break;
     case "cyes": { const pid = peekId; closeModal("#confirm"); peekId = null; $("#peek").classList.remove("open"); $("#scrim").classList.remove("open"); remove(pid); toast("Deleted."); break; }
@@ -759,8 +825,9 @@ document.addEventListener("keydown", e => {
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "n" || e.key === "N") { e.preventDefault(); openDump(); }
   if (e.key === "1") { view = "now"; store("view", view); render(); }
-  if (e.key === "2") { view = "board"; store("view", view); render(); }
-  if (e.key === "3") { view = "done"; store("view", view); render(); }
+  if (e.key === "2") { view = "today"; store("view", view); render(); }
+  if (e.key === "3") { view = "board"; store("view", view); render(); }
+  if (e.key === "4") { view = "done"; store("view", view); render(); }
   if (e.key === "r" || e.key === "R") { e.preventDefault(); refreshNow(); }
   if (e.key === "m" || e.key === "M") { e.preventDefault(); $("#modes").classList.contains("open") ? closeModes() : openModes(); }
 });
