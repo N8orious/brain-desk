@@ -308,6 +308,11 @@ body.life-open .lifebar{transform:none}
   .lifebar{width:min(380px,calc(100% - 24px));z-index:65}
 }
 
+/* ---------- all tasks ---------- */
+.allseg{margin:-4px 0 20px}
+.whengrp{margin-bottom:22px}
+.whengrp .row .chip{margin-right:2px}
+
 /* ---------- timeline ---------- */
 .tgrid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}
 .tline{display:flex;flex-direction:column;gap:10px}

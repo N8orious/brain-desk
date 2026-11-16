@@ -62,6 +62,7 @@ const P = {
   sunset: '<path d="M3 17h18M6.5 17a5.5 5.5 0 0 1 11 0M12 3.5v4M9.5 6 12 3.5 14.5 6M4.5 10.5l1.4 1M19.5 10.5l-1.4 1M7 21h10"/>',
   refresh: '<path d="M19.5 11A7.5 7.5 0 0 0 6 6.5L4 8.5M4 4v4.5h4.5M4.5 13A7.5 7.5 0 0 0 18 17.5l2-2M20 20v-4.5h-4.5"/>',
   spark: '<path d="M12 3.5 13.8 9 19.5 10.5 13.8 12.2 12 18 10.2 12.2 4.5 10.5 10.2 9z"/><path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  later: '<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17M10 15h6M13.5 12.5 16 15l-2.5 2.5"/>',
   leaf: '<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19c3-4 6-7 10-9"/>',
   moon: '<path d="M19.5 14.5A8 8 0 1 1 9.5 4.5a6.5 6.5 0 0 0 10 10z"/>',
   now: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>',
@@ -333,18 +334,22 @@ function nextMonday() { const d = new Date(); d.setDate(d.getDate() + ((8 - d.ge
 function openSnooze(id) {
   const it = items.find(i => i.id === id); if (!it) return; snoozeFor = id;
   $("#snzCard").textContent = it.title; $("#snzDate").value = ""; $("#snzDate").min = addDays(1);
-  $("#snzOpts").innerHTML = [["tomorrow", "Tomorrow", addDays(1)], ["monday", "Next Monday", nextMonday()], ["2w", "In 2 weeks", addDays(14)], ["hold", "On hold", "hold"]]
+  $("#snzCard").textContent = it.title;
+  $("#snzOpts").innerHTML = [["tomorrow", "Tomorrow", addDays(1)], ["d2", "Day after", addDays(2)], ["monday", "Next Monday", nextMonday()], ["2w", "In 2 weeks", addDays(14)], ["hold", "Someday", "hold"]]
     .map(([k, l, v]) => `<button type="button" class="snzopt" data-act="snzpick" data-v="${v}"><b>${l}</b><span>${v === "hold" ? "until you wake it" : new Date(v + "T00:00").toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" })}</span></button>`).join("");
   $("#snoozeModal").classList.add("open");
 }
+// "Not today": off Today and the timeline until that day (or someday). If it was due before then, the due date moves with it.
 function snooze(id, until) {
   const b = items.find(i => i.id === id); if (!b) return;
-  const before = { snoozeUntil: b.snoozeUntil || null, today: !!b.today, todayRank: b.todayRank ?? null, todayDate: b.todayDate || "" };
-  save(id, { snoozeUntil: until, today: false, todayRank: null, touchedAt: nowIso() }); rerank();
+  const before = { snoozeUntil: b.snoozeUntil || null, today: !!b.today, todayRank: b.todayRank ?? null, todayDate: b.todayDate || "", slot: b.slot || null, due: b.due || "" };
+  const p = { snoozeUntil: until, today: false, todayRank: null, slot: null, touchedAt: nowIso() };
+  if (until !== "hold" && b.due && b.due < until) p.due = until;
+  save(id, p); rerank();
   if (focusId === id) focusId = null;
   closeModal("#snoozeModal"); snoozeFor = null;
   const when = until === "hold" ? "on hold" : "until " + new Date(until + "T00:00").toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" });
-  toast(`Snoozed ${when}. It's off every list till then.`, () => { save(id, before); rerank(); });
+  toast(until === "hold" ? "Parked for someday. It's under All → Someday." : `Moved to ${new Date(until + "T00:00").toLocaleDateString("en", { weekday: "long", day: "numeric", month: "short" })}${p.due ? ", due date too" : ""}.`, () => { save(id, before); rerank(); });
 }
 function wake(id) { save(id, { snoozeUntil: null, touchedAt: nowIso() }); toast("Awake. Back on the board."); }
 function closeDay() {
@@ -366,7 +371,7 @@ function renderBar(mode) {
   const tab = (id, label, cnt) => `<button class="tab" role="tab" data-act="view" data-v="${id}" aria-selected="${view === id}">${label}${cnt ? `<span class="cnt">${cnt}</span>` : ""}</button>`;
   $("#bar").innerHTML = `<button class="modebtn glass" data-act="modes" style="--tint:${m.tint}" aria-label="Mode: ${m.name}. Change mode" aria-haspopup="dialog">
       <span class="mi">${ico(m.icon, 17)}</span><span class="nm">${m.name}</span>${override ? `<span class="live" title="Turned on by hand"></span>` : ""}<span class="chev">${ico("chev", 14)}</span></button>
-    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? Math.min(t, MUST) + "/" + MUST + (t > MUST ? " +" + (t - MUST) : "") : "")}${tab("timeline", "Timeline", "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
+    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? Math.min(t, MUST) + "/" + MUST + (t > MUST ? " +" + (t - MUST) : "") : "")}${tab("timeline", "Timeline", "")}${tab("board", "All", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
     <div class="bar-r"><span class="clock" id="clk">${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>
       <button class="iconbtn glass refresh" id="refreshBtn" data-act="refresh" aria-label="Refresh">${ico("refresh", 20)}<span class="sync" id="sync" data-s="${syncState}"></span></button>
       <button class="iconbtn glass lifebtn ${lifeOpen ? "on" : ""}" data-act="life" aria-label="Life tasks (L)" aria-pressed="${lifeOpen}">${ico("leaf", 20)}${lifeBadge() ? `<span class="badge">${lifeBadge()}</span>` : ""}</button>
@@ -385,8 +390,8 @@ function renderTop(mode) {
   const m = MODE[mode], d = new Date();
   const date = d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long" });
   if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>GitHub sync</h1><p class="line">Where your desk is saved.</p></div>`; return; }
-  const title = view === "timeline" ? "Timeline" : view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "Board" : "Done";
-  const line = view === "timeline" ? (isWeekend() ? "Weekend: side projects in the morning, life in the afternoon." : "Your day in blocks. Tap a block to put a card in it, or drag one in.") : view === "now" ? "What you're on right now. Tap a project to turn it on or off." : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
+  const title = view === "timeline" ? "Timeline" : view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "All tasks" : "Done";
+  const line = view === "timeline" ? (isWeekend() ? "Weekend: side projects in the morning, life in the afternoon." : "Your day in blocks. Tap a block to put a card in it, or drag one in.") : view === "now" ? "What you're on right now. Tap a project to turn it on or off." : view === "today" ? m.line : view === "board" ? (allMode === "area" ? "Everything open, by area. Press and hold a card to move it." : "Everything, by when. Not meant for today? Tap the calendar to move it.") : "What you finished and let go of.";
   const ov = override && view === "today" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
   $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>${title}</h1><p class="line">${esc(line)}</p>${ov}</div>
     ${view === "today" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
@@ -444,7 +449,7 @@ const list = (arr, fn, empty) => arr.length ? arr.map(fn).join("") : `<div class
 function slots(opts = {}) {
   const t = todays(), must = t.slice(0, MUST), more = t.slice(MUST);
   const arrows = (it, i) => `<span class="mv"><button class="btn sm icon ghost" data-act="up" data-id="${esc(it.id)}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${ico("up", 16)}</button><button class="btn sm icon ghost" data-act="down" data-id="${esc(it.id)}" aria-label="Move down" ${i === t.length - 1 ? "disabled" : ""}>${ico("down", 16)}</button></span>`;
-  const acts = it => opts.slotActions ? opts.slotActions(it) : `<button class="btn sm icon" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done" title="Done">${ico("check", 20)}</button><button class="btn sm icon" data-act="snooze" data-id="${esc(it.id)}" aria-label="Snooze" title="Snooze">${ico("moon", 18)}</button>${A.untoday(it)}`;
+  const acts = it => opts.slotActions ? opts.slotActions(it) : `<button class="btn sm icon" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done" title="Done">${ico("check", 20)}</button><button class="btn sm icon" data-act="snooze" data-id="${esc(it.id)}" aria-label="Not today" title="Not today">${ico("later", 20)}</button>${A.untoday(it)}`;
   let h = `<div class="slots">`;
   for (let i = 0; i < MUST; i++) {
     const it = must[i];
@@ -457,7 +462,7 @@ function slots(opts = {}) {
   }
   h += `</div>`;
   if (more.length || opts.showMore) {
-    h += `<div class="morehead"><span>If there's time</span><span class="n">${more.length}/${MAX_TODAY - MUST}</span></div><div class="pb more">${more.map((it, i) => row(it, arrows(it, i + MUST) + `<button class="btn sm icon" data-act="snooze" data-id="${esc(it.id)}" aria-label="Snooze" title="Snooze">${ico("moon", 16)}</button>` + A.untoday(it))).join("") || `<div class="empty">Room for ${MAX_TODAY - MUST} more. They don't count against the day.</div>`}</div>`;
+    h += `<div class="morehead"><span>If there's time</span><span class="n">${more.length}/${MAX_TODAY - MUST}</span></div><div class="pb more">${more.map((it, i) => row(it, arrows(it, i + MUST) + `<button class="btn sm icon" data-act="snooze" data-id="${esc(it.id)}" aria-label="Not today" title="Not today">${ico("later", 20)}</button>` + A.untoday(it))).join("") || `<div class="empty">Room for ${MAX_TODAY - MUST} more. They don't count against the day.</div>`}</div>`;
   }
   return h;
 }
@@ -821,7 +826,7 @@ function viewTimeline() {
       <button class="tc-main" data-act="peek" data-id="${esc(it.id)}"><span class="tc-time"><span class="zdot" style="--c:${zoneOf(it).color}"></span>${it.slot.start}–${it.slot.end}</span>
         <span class="tc-t">${esc(it.title)}</span>${dueTag(it, date)}
         <span class="tc-s">${step ? "→ " + esc(step.t) : "No first step yet"}</span></button>
-      ${carried ? `<div class="tc-carry"><span>Carried. Still on it?</span><button class="btn sm" data-act="treslot" data-id="${esc(it.id)}">Reslot</button><button class="btn sm ghost" data-act="tunslot" data-id="${esc(it.id)}">Unslot</button></div>` : ""}
+      ${carried ? `<div class="tc-carry"><span>Carried. Still on it?</span><button class="btn sm" data-act="treslot" data-id="${esc(it.id)}">Reslot</button><button class="btn sm ghost" data-act="snooze" data-id="${esc(it.id)}">Not today</button></div>` : ""}
     </div>`;
   };
   const blocks = dayBlocks(date).map(([a, b, name, fit]) => {
@@ -926,7 +931,40 @@ function viewSetup() {
 }
 
 /* ============================ VIEWS: BOARD / DONE ============================ */
+let allMode = recall("allMode", "when");
+function whenOf(it, t) {
+  if (it.snoozeUntil === "hold") return "someday";
+  const d = isSnoozed(it) ? it.snoozeUntil : it.today ? t : (it.slot && it.slot.date >= t ? it.slot.date : it.due || "");
+  if (!d) return "none";
+  if (d < t) return "overdue";
+  if (d === t) return "today";
+  if (d === addDays(1)) return "tomorrow";
+  const sun = new Date(); sun.setDate(sun.getDate() + ((7 - sun.getDay()) % 7)); return d <= dayKey(sun) ? "week" : "later";
+}
+const WHEN = [["overdue", "Overdue"], ["today", "Today"], ["tomorrow", "Tomorrow"], ["week", "Later this week"], ["later", "Later"], ["none", "No date"], ["someday", "Someday"]];
 function viewBoard() {
+  const seg = `<div class="seg allseg" role="group" aria-label="Group by"><button data-act="allmode" data-v="when" aria-pressed="${allMode === "when"}">By when</button><button data-act="allmode" data-v="area" aria-pressed="${allMode === "area"}">By area</button></div>`;
+  if (allMode === "area") return seg + viewArea();
+  const t = dayKey(), all = items.filter(isOpen);
+  const groups = Object.fromEntries(WHEN.map(([k]) => [k, []]));
+  all.forEach(it => groups[whenOf(it, t)].push(it));
+  const dateOf = it => isSnoozed(it) && it.snoozeUntil !== "hold" ? it.snoozeUntil : it.due || "";
+  const when = it => { const d = dateOf(it); return d && !["today", "overdue"].includes(whenOf(it, t)) ? `<span class="chip">${new Date(d + "T00:00").toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" })}</span>` : ""; };
+  const acts = (it, k) => k === "today" || k === "overdue"
+    ? (it.today ? "" : A.today(it)) + `<button class="btn sm icon" data-act="snooze" data-id="${esc(it.id)}" aria-label="Not today" title="Not today">${ico("later", 20)}</button>`
+    : `<button class="btn sm" data-act="pulltoday" data-id="${esc(it.id)}" title="Do it today">${ico("plus", 14)}<span class="bl">Today</span></button><button class="btn sm icon" data-act="snooze" data-id="${esc(it.id)}" aria-label="Move" title="Move to another day">${ico("later", 20)}</button>`;
+  return seg + WHEN.filter(([k]) => groups[k].length).map(([k, label]) => {
+    const arr = groups[k].sort((a, b) => (dateOf(a) || "9").localeCompare(dateOf(b) || "9") || (b.today ? 1 : 0) - (a.today ? 1 : 0) || a.title.localeCompare(b.title));
+    return `<section class="panel whengrp"><div class="ph"><h3>${label}</h3><span class="n">${arr.length}</span></div><div class="pb">${arr.map(it => row(it, when(it) + acts(it, k))).join("")}</div></section>`;
+  }).join("");
+}
+// pull a card into today from any day (wakes it if it was moved to later)
+function pullToday(id) {
+  const it = items.find(i => i.id === id); if (!it) return;
+  if (it.snoozeUntil) save(id, { snoozeUntil: null });
+  addToday(id);
+}
+function viewArea() {
   return `<div class="board" id="board"><div class="cols">${ZONES.map(z => {
     const arr = inZone(z.id).sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0) || (touched(b) || "").localeCompare(touched(a) || ""));
     return `<div class="col" data-zone="${z.id}"><div class="colh"><span class="zdot" style="--c:${z.color}"></span><h3>${z.name}</h3><span class="n">${arr.length}</span><button class="btn sm icon ghost" data-act="dump" data-z="${z.id}" aria-label="Add to ${z.name}">${ico("plus", 20)}</button></div>
@@ -1059,6 +1097,8 @@ document.addEventListener("click", e => {
     case "restore": save(id, { status: "open", droppedAt: null, touchedAt: nowIso() }); toast("Back on the desk."); break;
     case "park": { const it = items.find(i => i.id === id); save(id, { touchedAt: nowIso(), notes: ((it.notes || "") + `\nParked ${dayKey()}`).trim() }); toast("Parked. Quiet for another two weeks."); break; }
     case "today": addToday(id); break;
+    case "pulltoday": pullToday(id); break;
+    case "allmode": allMode = el.dataset.v; store("allMode", allMode); render(); break;
     case "tomorrow": addToday(id, addDays(1)); break;
     case "untoday": removeToday(id); break;
     case "up": moveToday(id, -1); break;

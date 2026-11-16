@@ -13,7 +13,7 @@
 <link rel="icon" href="icon-180.png">
 <link rel="manifest" href="manifest.json">
 <title>Brain Desk</title>
-<link rel="stylesheet" href="styles.css?v=tl3">
+<link rel="stylesheet" href="styles.css?v=all1">
 </head>
 <body>
 <div class="app">
@@ -80,13 +80,13 @@
     <div class="mfoot" style="margin:0 -22px"><span class="hint"></span><button class="btn" data-act="stepcancel">Cancel</button><button class="btn primary" data-act="stepgo" id="stepGo">Add to today</button></div>
   </div>
 </div>
-<div class="modal" id="snoozeModal" role="dialog" aria-label="Snooze">
-  <div class="mbox" style="padding:18px 18px 6px">
-    <div class="sect" style="margin:0">Snooze until</div>
+<div class="modal" id="snoozeModal" role="dialog" aria-label="Not today">
+  <div class="mbox" style="padding:22px 22px 6px">
+    <div class="sect" style="margin:0">Not today. When then?</div>
     <div id="snzCard" style="font-weight:600;font-size:17px;margin:4px 0 14px"></div>
     <div id="snzOpts" class="snzgrid"></div>
-    <div style="display:flex;gap:8px;align-items:center;margin:12px 0 10px"><input class="field" type="date" id="snzDate" aria-label="Pick a date" style="max-width:200px"><button class="btn" data-act="snzdate">Snooze till this date</button></div>
-    <p class="dim" style="font-size:var(--t-sub);margin:0 0 10px">It leaves every list and comes back on its own. Find it on the Board under Snoozed.</p>
+    <div style="display:flex;gap:8px;align-items:center;margin:12px 0 10px"><input class="field" type="date" id="snzDate" aria-label="Pick a date" style="max-width:200px"><button class="btn" data-act="snzdate">Move to this day</button></div>
+    <p class="dim" style="font-size:var(--t-sub);margin:0 0 10px">It leaves Today and the timeline, and comes back on that day. Find it under All.</p>
     <div class="mfoot" style="margin:0 -18px"><span class="hint"></span><button class="btn" data-act="snzcancel">Cancel</button></div>
   </div>
 </div>
@@ -110,6 +110,6 @@
   <div class="cbox"><p id="cMsg"></p><div class="acts"><button class="btn" data-act="cno">Keep it</button><button class="btn primary" data-act="cyes">Delete</button></div></div>
 </div>
 <div class="toast" id="toast" role="status"></div>
-<script src="app.js?v=tl3"></script>
+<script src="app.js?v=all1"></script>
 </body>
 </html>
