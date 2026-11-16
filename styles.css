@@ -368,3 +368,16 @@ textarea.field{padding:12px 14px;resize:vertical;line-height:1.45}
   .habit .hd{display:none}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* today: reorder + if there's time */
+.mv{display:inline-flex;gap:0;margin-right:2px}
+.mv .btn:disabled{opacity:.25;pointer-events:none}
+.morehead{display:flex;justify-content:space-between;align-items:center;padding:6px 14px 4px;font-size:var(--t-sub,13px);font-weight:600;color:var(--text-2);border-top:1px solid var(--line-2)}
+.morehead .n{color:var(--text-3);font-weight:500}
+.pb.more{padding-top:0}
+/* snooze */
+.snzgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.snzopt{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--raise);text-align:left;min-height:56px}
+.snzopt:hover{border-color:var(--accent)}
+.snzopt b{font-weight:600}
+.snzopt span{font-size:var(--t-sub,13px);color:var(--text-2)}

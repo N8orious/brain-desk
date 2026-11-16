@@ -65,6 +65,8 @@ const P = {
   moon: '<path d="M19.5 14.5A8 8 0 1 1 9.5 4.5a6.5 6.5 0 0 0 10 10z"/>',
   now: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>',
   board: '<rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="10.5" y="4" width="5" height="11" rx="1.5"/><rect x="17.5" y="4" width="3" height="7" rx="1.2"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   check: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
@@ -136,7 +138,13 @@ function whenLabel(m) {
 
 /* ============================ DERIVED ============================ */
 const isOpen = it => !it.status || it.status === "open";
-const openItems = () => items.filter(isOpen);
+// Snoozed cards stay open but leave every list until their date (or until woken, for "on hold").
+const isSnoozed = it => !!it.snoozeUntil && (it.snoozeUntil === "hold" || it.snoozeUntil > dayKey());
+const openItems = () => items.filter(it => isOpen(it) && !isSnoozed(it));
+const snoozedItems = () => items.filter(it => isOpen(it) && isSnoozed(it)).sort((a, b) => (a.snoozeUntil === "hold") - (b.snoozeUntil === "hold") || (a.snoozeUntil || "").localeCompare(b.snoozeUntil || ""));
+const backFromSnooze = it => it.snoozeUntil && it.snoozeUntil !== "hold" && it.snoozeUntil <= dayKey() && it.snoozeUntil >= addDays(-2);
+// Today = 3 "must do" slots (what the plan and timer work from) + up to 5 "if there's time".
+const MUST = 3, MAX_TODAY = 8;
 const inZone = z => openItems().filter(it => (it.zone || "inbox") === z);
 const todays = () => openItems().filter(it => it.today).sort((a, b) => (a.todayRank ?? 9) - (b.todayRank ?? 9));
 const carried = it => it.today && it.todayDate && it.todayDate < dayKey();
@@ -300,16 +308,44 @@ function keepIt(id) { save(id, { touchedAt: nowIso(), todayDate: dayKey() }); to
 // ADHD rule: nothing goes on today without a first step small enough to start in 2 minutes.
 function addToday(id, date = dayKey()) {
   const it = items.find(i => i.id === id); if (!it || it.today) return;
-  if (todays().length >= 3) { toast("Three is the limit. Finish or remove one first."); return; }
+  if (todays().length >= MAX_TODAY) { toast(`Today is full at ${MAX_TODAY}. Finish, snooze or remove one first.`); return; }
   if (!stepsLeft(it).length) { openStep(id, date); return; }
   addTodayNow(id, date);
 }
 function addTodayNow(id, date = dayKey()) {
   const it = items.find(i => i.id === id); if (!it || it.today) return;
-  const t = todays(); if (t.length >= 3) { toast("Three is the limit. Finish or remove one first."); return; }
+  const t = todays(); if (t.length >= MAX_TODAY) { toast(`Today is full at ${MAX_TODAY}. Finish, snooze or remove one first.`); return; }
   save(id, { today: true, todayRank: t.length + 1, todayDate: date, touchedAt: nowIso() });
+  if (t.length >= MUST) toast("Added under \"If there's time\". Move it up if it matters more.");
 }
 function removeToday(id) { save(id, { today: false, todayRank: null }); rerank(); }
+// Reorder today: your order is the priority. Moving past slot 3 shifts a card between "Must do" and "If there's time".
+function moveToday(id, dir) {
+  const t = todays(), i = t.findIndex(x => x.id === id), j = i + dir;
+  if (i < 0 || j < 0 || j >= t.length) return;
+  [t[i], t[j]] = [t[j], t[i]];
+  t.forEach((it, k) => { if (it.todayRank !== k + 1) save(it.id, { todayRank: k + 1, touchedAt: nowIso() }); });
+  if ((i < MUST) !== (j < MUST)) toast(j < MUST ? "Moved into Must do." : "Moved to If there's time.");
+}
+let snoozeFor = null;
+function nextMonday() { const d = new Date(); d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7)); return dayKey(d); }
+function openSnooze(id) {
+  const it = items.find(i => i.id === id); if (!it) return; snoozeFor = id;
+  $("#snzCard").textContent = it.title; $("#snzDate").value = ""; $("#snzDate").min = addDays(1);
+  $("#snzOpts").innerHTML = [["tomorrow", "Tomorrow", addDays(1)], ["monday", "Next Monday", nextMonday()], ["2w", "In 2 weeks", addDays(14)], ["hold", "On hold", "hold"]]
+    .map(([k, l, v]) => `<button type="button" class="snzopt" data-act="snzpick" data-v="${v}"><b>${l}</b><span>${v === "hold" ? "until you wake it" : new Date(v + "T00:00").toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" })}</span></button>`).join("");
+  $("#snoozeModal").classList.add("open");
+}
+function snooze(id, until) {
+  const b = items.find(i => i.id === id); if (!b) return;
+  const before = { snoozeUntil: b.snoozeUntil || null, today: !!b.today, todayRank: b.todayRank ?? null, todayDate: b.todayDate || "" };
+  save(id, { snoozeUntil: until, today: false, todayRank: null, touchedAt: nowIso() }); rerank();
+  if (focusId === id) focusId = null;
+  closeModal("#snoozeModal"); snoozeFor = null;
+  const when = until === "hold" ? "on hold" : "until " + new Date(until + "T00:00").toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" });
+  toast(`Snoozed ${when}. It's off every list till then.`, () => { save(id, before); rerank(); });
+}
+function wake(id) { save(id, { snoozeUntil: null, touchedAt: nowIso() }); toast("Awake. Back on the board."); }
 function closeDay() {
   const tm = addDays(1);
   todays().forEach(it => save(it.id, { todayDate: tm }));
@@ -329,7 +365,7 @@ function renderBar(mode) {
   const tab = (id, label, cnt) => `<button class="tab" role="tab" data-act="view" data-v="${id}" aria-selected="${view === id}">${label}${cnt ? `<span class="cnt">${cnt}</span>` : ""}</button>`;
   $("#bar").innerHTML = `<button class="modebtn glass" data-act="modes" style="--tint:${m.tint}" aria-label="Mode: ${m.name}. Change mode" aria-haspopup="dialog">
       <span class="mi">${ico(m.icon, 17)}</span><span class="nm">${m.name}</span>${override ? `<span class="live" title="Turned on by hand"></span>` : ""}<span class="chev">${ico("chev", 14)}</span></button>
-    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? t + "/3" : "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
+    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? Math.min(t, MUST) + "/" + MUST + (t > MUST ? " +" + (t - MUST) : "") : "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
     <div class="bar-r"><span class="clock" id="clk">${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>
       <button class="iconbtn glass refresh" id="refreshBtn" data-act="refresh" aria-label="Refresh">${ico("refresh", 20)}<span class="sync" id="sync" data-s="${syncState}"></span></button>
       <button class="addbtn" data-act="dump" aria-label="Dump a thought (N)">${ico("plus", 22)}</button></div>`;
@@ -371,6 +407,7 @@ function renderBody(mode) {
 /* ============================ RENDER: PARTS ============================ */
 function chips(it) {
   const c = [];
+  if (backFromSnooze(it)) c.push(`<span class="chip due">Back from snooze</span>`);
   const st = it.steps || []; if (st.length) c.push(`<span class="chip">${st.filter(s => s.done).length}/${st.length}</span>`);
   if (it.due) { const f = fmtDue(it.due); c.push(`<span class="chip ${it.due < dayKey() ? "late" : it.due <= addDays(2) ? "due" : ""}">${f}</span>`); }
   if (it.energy === "low") c.push(`<span class="chip low">Low</span>`);
@@ -402,17 +439,24 @@ function panel(title, n, body, extra = "") {
 }
 const list = (arr, fn, empty) => arr.length ? arr.map(fn).join("") : `<div class="empty">${empty}</div>`;
 function slots(opts = {}) {
-  const t = todays(); let h = `<div class="slots">`;
-  for (let i = 0; i < 3; i++) {
-    const it = t[i];
+  const t = todays(), must = t.slice(0, MUST), more = t.slice(MUST);
+  const arrows = (it, i) => `<span class="mv"><button class="btn sm icon ghost" data-act="up" data-id="${esc(it.id)}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${ico("up", 16)}</button><button class="btn sm icon ghost" data-act="down" data-id="${esc(it.id)}" aria-label="Move down" ${i === t.length - 1 ? "disabled" : ""}>${ico("down", 16)}</button></span>`;
+  const acts = it => opts.slotActions ? opts.slotActions(it) : `<button class="btn sm icon" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done" title="Done">${ico("check", 20)}</button><button class="btn sm icon" data-act="snooze" data-id="${esc(it.id)}" aria-label="Snooze" title="Snooze">${ico("moon", 18)}</button>${A.untoday(it)}`;
+  let h = `<div class="slots">`;
+  for (let i = 0; i < MUST; i++) {
+    const it = must[i];
     if (!it) { h += `<div class="slot empty-slot"><span class="rk">${i + 1}</span><h4>${opts.emptyText || "Open slot. Add one from Suggested."}</h4><span></span></div>`; continue; }
     const nx = stepsLeft(it)[0];
     h += `<div class="slot" data-act="peek" data-id="${esc(it.id)}"><span class="rk">${i + 1}</span>
       <div style="min-width:0"><h4>${esc(it.title)}</h4><div class="sub">${esc(it.project || zoneOf(it).name)}${nx ? " · next: " + esc(nx.t) : ""}</div>${nx ? "" : `<button class="linkbtn" data-act="firststep" data-id="${esc(it.id)}">${ico("plus", 13)}Add a 2-minute first step</button>`}
       ${carried(it) && opts.askCarried !== false ? `<div class="ask"><span class="dim" style="font-size:var(--t-sub)">From ${it.todayDate === addDays(-1) ? "yesterday" : "earlier"}.</span>${A.done(it)}<button class="btn sm" data-act="keep" data-id="${esc(it.id)}">Still on it</button>${A.dropTxt(it)}</div>` : ""}</div>
-      <div class="ra">${opts.slotActions ? opts.slotActions(it) : `<button class="btn sm icon" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done" title="Done">${ico("check", 20)}</button>${A.untoday(it)}`}</div></div>`;
+      <div class="ra">${t.length > 1 ? arrows(it, i) : ""}${acts(it)}</div></div>`;
   }
-  return h + `</div>`;
+  h += `</div>`;
+  if (more.length || opts.showMore) {
+    h += `<div class="morehead"><span>If there's time</span><span class="n">${more.length}/${MAX_TODAY - MUST}</span></div><div class="pb more">${more.map((it, i) => row(it, arrows(it, i + MUST) + `<button class="btn sm icon" data-act="snooze" data-id="${esc(it.id)}" aria-label="Snooze" title="Snooze">${ico("moon", 16)}</button>` + A.untoday(it))).join("") || `<div class="empty">Room for ${MAX_TODAY - MUST} more. They don't count against the day.</div>`}</div>`;
+  }
+  return h;
 }
 
 /* ============================ HABITS ============================
@@ -494,7 +538,7 @@ function saveStep() {
 /* ============================ VIEWS: MODES ============================ */
 function vPlan() {
   const t = todays(), sug = suggestions(6), dump = inZone("inbox");
-  const left = `<section class="panel"><div class="ph"><h3>Today's three</h3><span class="n">${t.length}/3</span></div>${slots()}
+  const left = `<section class="panel"><div class="ph"><h3>Must do</h3><span class="n">${Math.min(t.length, MUST)}/${MUST}</span><span class="act dim" style="font-size:var(--t-sub)">Your order is the priority</span></div>${slots({ showMore: true })}
       <div class="below"><button class="btn primary lg" data-act="mode" data-m="focus">${ico("target", 18)}Start deep work</button><span class="dim" style="font-size:var(--t-sub)">Hides everything except these.</span></div></section>`;
   const right = panel("Suggested", "", list(sug, it => row(it, A.today(it)), "Nothing waiting. Nice.")) +
     `<div style="height:26px"></div>` +
@@ -523,7 +567,7 @@ function vFocus() {
 function vLow() {
   const easy = openItems().filter(isEasy).sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0)).slice(0, 12);
   return habitsPanel() + `<div class="grid g2">${panel("Easy wins", easy.length, list(easy, it => row(it, (it.today ? "" : A.today(it)) + A.drop(it)), "No small tasks tagged. Open a card and set Size to 15 min or Energy to Low."))}
-    <div>${panel("Today's three", todays().length + "/3", slots({ askCarried: false }))}<div class="note">${ico("battery", 14)}Low energy is normal. One small thing done beats a big thing stared at.</div></div></div>`;
+    <div>${panel("Must do", Math.min(todays().length, MUST) + "/" + MUST, slots({ askCarried: false }))}<div class="note">${ico("battery", 14)}Low energy is normal. One small thing done beats a big thing stared at.</div></div></div>`;
 }
 function vShutdown() {
   const t = todays(), k = dayKey();
@@ -688,7 +732,12 @@ function viewBoard() {
     return `<div class="col" data-zone="${z.id}"><div class="colh"><span class="zdot" style="--c:${z.color}"></span><h3>${z.name}</h3><span class="n">${arr.length}</span><button class="btn sm icon ghost" data-act="dump" data-z="${z.id}" aria-label="Add to ${z.name}">${ico("plus", 20)}</button></div>
       <div class="cards">${arr.map(it => `<div class="bcard" data-act="peek" data-id="${esc(it.id)}"><div class="bt"><button class="st" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done">${statusIcon(it)}</button><span class="tt">${esc(it.title)}</span></div>
         <div class="bm">${it.project ? `<span class="proj">${esc(it.project)}</span>` : ""}${chips(it)}</div></div>`).join("") || `<div class="empty">Empty</div>`}</div></div>`;
-  }).join("")}</div></div>`;
+  }).join("")}</div>${snoozedPanel()}</div>`;
+}
+function snoozedPanel() {
+  const z = snoozedItems(); if (!z.length) return "";
+  const until = it => it.snoozeUntil === "hold" ? "On hold" : "Back " + new Date(it.snoozeUntil + "T00:00").toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" });
+  return `<div style="margin-top:22px">${panel("Snoozed", z.length, z.map(it => row(it, `<span class="chip">${until(it)}</span><button class="btn sm" data-act="wake" data-id="${esc(it.id)}">Wake</button>`)).join(""))}</div>`;
 }
 function viewDone() {
   const done = items.filter(it => it.status === "done" && it.doneAt && ago(it.doneAt) < 14).sort((a, b) => b.doneAt.localeCompare(a.doneAt));
@@ -811,6 +860,14 @@ document.addEventListener("click", e => {
     case "today": addToday(id); break;
     case "tomorrow": addToday(id, addDays(1)); break;
     case "untoday": removeToday(id); break;
+    case "up": moveToday(id, -1); break;
+    case "down": moveToday(id, 1); break;
+    case "snooze": openSnooze(id); break;
+    case "snzpick": snooze(snoozeFor, el.dataset.v); break;
+    case "snzdate": { const v = $("#snzDate").value; if (v) snooze(snoozeFor, v); else $("#snzDate").focus(); break; }
+    case "snzcancel": snoozeFor = null; closeModal("#snoozeModal"); break;
+    case "wake": wake(id); break;
+    case "peeksnooze": { const pid = peekId; closePeek(); openSnooze(pid); break; }
     case "zone": save(id, { zone: el.dataset.z, rx: null, ry: null, touchedAt: nowIso() }); break;
     case "focuson": focusId = id; save(id, { touchedAt: nowIso() }); break;
     case "stepdone": { const it = items.find(i => i.id === id); const st = (it.steps || []).map(s => ({ ...s })); st[+el.dataset.i].done = true; save(id, { steps: st, touchedAt: nowIso() }); break; }
@@ -854,7 +911,7 @@ $("#stepIn2").addEventListener("keydown", e => { if (e.key === "Enter") { e.prev
 $("#dumpTxt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveDump(); } });
 document.addEventListener("keydown", e => {
   const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
-  if (e.key === "Escape") { if ($("#modes").classList.contains("open")) { closeModes(); return; } if ($("#stepModal").classList.contains("open")) { closeModal("#stepModal"); return; } if ($("#habitModal").classList.contains("open")) { closeModal("#habitModal"); return; } if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
+  if (e.key === "Escape") { if ($("#modes").classList.contains("open")) { closeModes(); return; } if ($("#stepModal").classList.contains("open")) { closeModal("#stepModal"); return; } if ($("#snoozeModal").classList.contains("open")) { closeModal("#snoozeModal"); return; } if ($("#habitModal").classList.contains("open")) { closeModal("#habitModal"); return; } if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "n" || e.key === "N") { e.preventDefault(); openDump(); }
   if (e.key === "1") { view = "now"; store("view", view); render(); }

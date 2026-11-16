@@ -52,6 +52,7 @@
   </div>
   <div class="pk-f">
     <button class="btn primary" data-act="peekfocus">Focus on this</button>
+    <button class="btn" data-act="peeksnooze">Snooze</button>
     <button class="btn bad" data-act="peekdelete">Delete</button>
   </div>
 </aside>
@@ -76,6 +77,16 @@
     <div class="seg" id="stepIdeas" style="margin:10px 0 8px"></div>
     <p class="dim" style="font-size:var(--t-foot);margin:0 0 10px">Starting is the hard part. Make it tiny.</p>
     <div class="mfoot" style="margin:0 -22px"><span class="hint"></span><button class="btn" data-act="stepcancel">Cancel</button><button class="btn primary" data-act="stepgo" id="stepGo">Add to today</button></div>
+  </div>
+</div>
+<div class="modal" id="snoozeModal" role="dialog" aria-label="Snooze">
+  <div class="mbox" style="padding:18px 18px 6px">
+    <div class="sect" style="margin:0">Snooze until</div>
+    <div id="snzCard" style="font-weight:600;font-size:17px;margin:4px 0 14px"></div>
+    <div id="snzOpts" class="snzgrid"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin:12px 0 10px"><input class="field" type="date" id="snzDate" aria-label="Pick a date" style="max-width:200px"><button class="btn" data-act="snzdate">Snooze till this date</button></div>
+    <p class="dim" style="font-size:var(--t-sub);margin:0 0 10px">It leaves every list and comes back on its own. Find it on the Board under Snoozed.</p>
+    <div class="mfoot" style="margin:0 -18px"><span class="hint"></span><button class="btn" data-act="snzcancel">Cancel</button></div>
   </div>
 </div>
 <div class="modal" id="habitModal" role="dialog" aria-label="Edit habits">
