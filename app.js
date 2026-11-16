@@ -62,6 +62,7 @@ const P = {
   sunset: '<path d="M3 17h18M6.5 17a5.5 5.5 0 0 1 11 0M12 3.5v4M9.5 6 12 3.5 14.5 6M4.5 10.5l1.4 1M19.5 10.5l-1.4 1M7 21h10"/>',
   refresh: '<path d="M19.5 11A7.5 7.5 0 0 0 6 6.5L4 8.5M4 4v4.5h4.5M4.5 13A7.5 7.5 0 0 0 18 17.5l2-2M20 20v-4.5h-4.5"/>',
   spark: '<path d="M12 3.5 13.8 9 19.5 10.5 13.8 12.2 12 18 10.2 12.2 4.5 10.5 10.2 9z"/><path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  leaf: '<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19c3-4 6-7 10-9"/>',
   moon: '<path d="M19.5 14.5A8 8 0 1 1 9.5 4.5a6.5 6.5 0 0 0 10 10z"/>',
   now: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>',
   board: '<rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="10.5" y="4" width="5" height="11" rx="1.5"/><rect x="17.5" y="4" width="3" height="7" rx="1.2"/>',
@@ -356,7 +357,7 @@ function closeDay() {
 /* ============================ RENDER: SHELL ============================ */
 function render() {
   const mode = currentMode();
-  renderBar(mode); renderModes(mode); renderTop(mode); renderBodyWrap(mode);
+  renderBar(mode); renderModes(mode); renderTop(mode); renderBodyWrap(mode); renderLife();
   if (peekId) fillPeek(false);
 }
 // Floating bar: mode button (left), tab bar (centre), clock + sync + add (right). HIG: tab bar on top on iPad.
@@ -365,9 +366,10 @@ function renderBar(mode) {
   const tab = (id, label, cnt) => `<button class="tab" role="tab" data-act="view" data-v="${id}" aria-selected="${view === id}">${label}${cnt ? `<span class="cnt">${cnt}</span>` : ""}</button>`;
   $("#bar").innerHTML = `<button class="modebtn glass" data-act="modes" style="--tint:${m.tint}" aria-label="Mode: ${m.name}. Change mode" aria-haspopup="dialog">
       <span class="mi">${ico(m.icon, 17)}</span><span class="nm">${m.name}</span>${override ? `<span class="live" title="Turned on by hand"></span>` : ""}<span class="chev">${ico("chev", 14)}</span></button>
-    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? Math.min(t, MUST) + "/" + MUST + (t > MUST ? " +" + (t - MUST) : "") : "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
+    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? Math.min(t, MUST) + "/" + MUST + (t > MUST ? " +" + (t - MUST) : "") : "")}${tab("timeline", "Timeline", "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
     <div class="bar-r"><span class="clock" id="clk">${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>
       <button class="iconbtn glass refresh" id="refreshBtn" data-act="refresh" aria-label="Refresh">${ico("refresh", 20)}<span class="sync" id="sync" data-s="${syncState}"></span></button>
+      <button class="iconbtn glass lifebtn ${lifeOpen ? "on" : ""}" data-act="life" aria-label="Life and habits (L)" aria-pressed="${lifeOpen}">${ico("leaf", 20)}${lifeBadge() ? `<span class="badge">${lifeBadge()}</span>` : ""}</button>
       <button class="addbtn" data-act="dump" aria-label="Dump a thought (N)">${ico("plus", 22)}</button></div>`;
 }
 function renderModes(mode) {
@@ -383,8 +385,8 @@ function renderTop(mode) {
   const m = MODE[mode], d = new Date();
   const date = d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long" });
   if (view === "settings" || !gh.token || syncState === "auth") { $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>GitHub sync</h1><p class="line">Where your desk is saved.</p></div>`; return; }
-  const title = view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "Board" : "Done";
-  const line = view === "now" ? "What you're on right now. Tap a project to turn it on or off." : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
+  const title = view === "timeline" ? "Timeline" : view === "now" ? "Now" : view === "today" ? m.name : view === "board" ? "Board" : "Done";
+  const line = view === "timeline" ? (isWeekend() ? "Weekend: side projects in the morning, life in the afternoon." : "Your day in blocks. Tap a block to put a card in it, or drag one in.") : view === "now" ? "What you're on right now. Tap a project to turn it on or off." : view === "today" ? m.line : view === "board" ? "Everything open, by zone. Press and hold a card to move it." : "What you finished and let go of.";
   const ov = override && view === "today" ? `<div class="override">On by hand until ${new Date(override.until).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}<button data-act="auto">Back to schedule</button></div>` : "";
   $("#top").innerHTML = `<div class="hero-l"><p class="eyebrow">${date}</p><h1>${title}</h1><p class="line">${esc(line)}</p>${ov}</div>
     ${view === "today" ? `<div class="tleft" id="tleft" style="--tint:${m.tint}"><div class="tl-txt"><span id="tlLabel"></span><span id="tlNext" class="dim"></span></div><div class="tl-track"><i id="tlFill"></i></div></div>` : ""}`;
@@ -397,6 +399,7 @@ function renderBody(mode) {
   else if (view === "board") h += viewBoard();
   else if (view === "done") h += viewDone();
   else if (view === "now") h += viewNow();
+  else if (view === "timeline") h += viewTimeline();
   else h += ({ plan: vPlan, focus: vFocus, low: vLow, shutdown: vShutdown, reset: vReset, free: vFree, sleep: vSleep }[mode] || vFree)();
   const before = view === "now" ? tilePos() : null;
   b.innerHTML = h; sc.scrollTop = y;
@@ -543,7 +546,7 @@ function vPlan() {
   const right = panel("Suggested", "", list(sug, it => row(it, A.today(it)), "Nothing waiting. Nice.")) +
     `<div style="height:26px"></div>` +
     panel("Brain dump", dump.length, list(dump.slice(0, 6), it => row(it, A.today(it) + A.drop(it)), "Empty. Press N whenever something pops up."));
-  return habitsPanel() + `<div class="grid g2">${left}<div>${right}</div></div>`;
+  return `<div class="grid g2">${left}<div>${right}</div></div>`;
 }
 function vFocus() {
   const t = todays();
@@ -566,7 +569,7 @@ function vFocus() {
 }
 function vLow() {
   const easy = openItems().filter(isEasy).sort((a, b) => (b.today ? 1 : 0) - (a.today ? 1 : 0)).slice(0, 12);
-  return habitsPanel() + `<div class="grid g2">${panel("Easy wins", easy.length, list(easy, it => row(it, (it.today ? "" : A.today(it)) + A.drop(it)), "No small tasks tagged. Open a card and set Size to 15 min or Energy to Low."))}
+  return `<div class="grid g2">${panel("Easy wins", easy.length, list(easy, it => row(it, (it.today ? "" : A.today(it)) + A.drop(it)), "No small tasks tagged. Open a card and set Size to 15 min or Energy to Low."))}
     <div>${panel("Must do", Math.min(todays().length, MUST) + "/" + MUST, slots({ askCarried: false }))}<div class="note">${ico("battery", 14)}Low energy is normal. One small thing done beats a big thing stared at.</div></div></div>`;
 }
 function vShutdown() {
@@ -581,13 +584,13 @@ function vShutdown() {
   const c3 = panel("Set tomorrow", "", `${slots({ emptyText: "Open slot", askCarried: false, slotActions: it => A.untoday(it) })}
       ${fill > 0 ? `<div class="sect" style="padding:18px 6px 8px">Fill ${fill} more</div>` + list(suggestions(4), it => row(it, A.tomorrow(it)), "") : ""}
       <div style="padding:14px 0 0"><button class="btn primary lg" style="width:100%" data-act="closeday">${ico("moon", 18)}Close the day</button></div>`, `<span class="step act">3</span>`);
-  return habitsPanel() + `<div class="grid g3">${c1}${c2}${c3}</div>`;
+  return `<div class="grid g3">${c1}${c2}${c3}</div>`;
 }
 function vFree() {
   const workN = inZone("work").length;
   const b = inZone("builds"), l = inZone("life");
   const pick = [...b, ...l].filter(i => i.energy !== "high").slice(0, 1)[0] || b[0];
-  return habitsPanel() + `${pick ? `<section class="panel" style="margin-bottom:26px"><div class="ph"><h3>If you feel like it</h3><span class="n">no pressure</span></div><div class="pb">${row(pick)}</div></section>` : ""}
+  return `${pick ? `<section class="panel" style="margin-bottom:26px"><div class="ph"><h3>If you feel like it</h3><span class="n">no pressure</span></div><div class="pb">${row(pick)}</div></section>` : ""}
     <div class="grid g22">${panel("Builds", b.length, list(b, it => row(it, A.drop(it)), "No builds on the desk."))}${panel("Life", l.length, list(l, it => row(it, A.drop(it)), "Nothing here."))}</div>
     <div class="note">${ico("x", 14)}Work is closed. ${workN} work card${workN === 1 ? "" : "s"} will be there tomorrow.</div>`;
 }
@@ -608,7 +611,6 @@ function vSleep() {
   return `<div class="sleep"><span class="moon">${ico("moon", 26)}</span><h2>${t.length ? "Tomorrow is set." : "Nothing set for tomorrow. That's fine."}</h2>
     <p class="muted" style="margin:0">You can stop thinking about it now. It's all on the desk.</p>
     ${t.length ? panel("Tomorrow's three", "", t.map(it => row(it)).join("")) : ""}
-    ${habitList().length ? `<div style="width:100%;text-align:left">${habitsPanel()}</div>` : ""}
     <button class="btn lg" data-act="dump">${ico("dump", 18)}Mind racing? Dump it here</button></div>`;
 }
 
@@ -636,6 +638,7 @@ const dueRank = (it, t) => it.due && it.due <= t ? 0 : 1;
 function streams() {
   const open = openItems(), groups = new Map();
   open.forEach(it => {
+    if (it.zone === "life") return;            // life tasks live in the Life sidebar, not on Now
     const k = streamKey(it), z = it.zone || "inbox";
     if (!groups.has(k)) groups.set(k, { key: k, name: k === "l:life" ? "Life admin" : k.slice(2), zone: z === "life" ? "life" : z,
       area: z === "work" ? "SUPR" : z === "builds" ? "Side project" : z === "life" ? "Life" : "Brain dump", cards: [] });
@@ -683,6 +686,204 @@ function viewNow() {
       : `<div class="empty">Nothing on right now. Tap a project below, or tell Task Master "I'm on A, B, C".</div>`) +
     (off.length ? `<div class="ph" style="margin-top:26px"><h3>Not on right now</h3><span class="n">${off.length}</span></div><div class="schips">${off.map(chip).join("")}</div>` : "");
 }
+
+/* ============================ LIFE SIDEBAR ============================
+   Life tasks and habits sit in their own panel on the right, out of the way of the day's main work.
+   Docked beside the content on a wide screen (landscape), slides over it when narrow (portrait, Split View). */
+let lifeOpen = recall("life", matchMedia("(min-width: 1100px)").matches);
+function setLife(on) {
+  lifeOpen = on; store("life", on);
+  document.body.classList.toggle("life-open", on);
+  renderBar(currentMode()); renderLife();
+  if (view === "now") packTiles();
+}
+const lifeItems = () => { const t = dayKey(); return openItems().filter(it => it.zone === "life").sort((a, b) =>
+  (a.due && a.due <= t ? 0 : 1) - (b.due && b.due <= t ? 0 : 1) || (b.today ? 1 : 0) - (a.today ? 1 : 0) || (a.due || "9").localeCompare(b.due || "9") || touched(b).localeCompare(touched(a))); };
+function lifeBadge() {
+  const t = dayKey();
+  return lifeItems().filter(it => it.due && it.due <= t).length + habitList().filter(h => !(h.days && h.days[t])).length;
+}
+function renderLife() {
+  const el = $("#life"); if (!el) return;
+  document.body.classList.toggle("life-open", lifeOpen);
+  if (!lifeOpen) { el.innerHTML = ""; return; }
+  const t = dayKey(), hs = habitList(), li = lifeItems(), doneN = hs.filter(h => h.days && h.days[t]).length;
+  const habit = h => { const on = !!(h.days && h.days[t]), st = streak(h);
+    return `<button class="lhabit ${on ? "on" : ""}" data-act="habit" data-id="${esc(h.id)}" aria-pressed="${on}"><span class="hc">${on ? ico("tick", 15) : ""}</span><span class="hn">${esc(h.title)}</span>${st > 1 ? `<span class="hs">${st}d</span>` : ""}</button>`; };
+  const task = it => { const step = stepsLeft(it)[0];
+    return `<div class="ltask"><button class="st" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done">${statusIcon(it).replace(/width="24" height="24"/, 'width="22" height="22"')}</button>
+      <button class="lt-main" data-act="peek" data-id="${esc(it.id)}"><span class="lt-t">${esc(it.title)}</span>${step ? `<span class="lt-s">→ ${esc(step.t)}</span>` : ""}</button>${dueTag(it, t)}</div>`; };
+  el.innerHTML = `<div class="lf-h"><span class="lf-ic">${ico("leaf", 18)}</span><h2>Life</h2><button class="btn sm icon" data-act="lifeclose" aria-label="Close">${ico("x", 18)}</button></div>
+    <div class="lf-b">
+      <div class="lf-sec"><div class="lf-sh"><h3>Habits</h3><span class="n">${doneN}/${hs.length}</span><button class="linkbtn" data-act="habitedit">${hs.length ? "Edit" : "Add"}</button></div>
+        ${hs.length ? `<div class="lhabits">${hs.map(habit).join("")}</div>` : `<p class="dim lf-empty">The few things you want to do most days.</p>`}</div>
+      <div class="lf-sec"><div class="lf-sh"><h3>Life tasks</h3><span class="n">${li.length}</span></div>
+        <form class="lf-add" id="lifeForm" autocomplete="off"><input class="field" id="lifeIn" type="text" placeholder="Get the kitchen window fixed" aria-label="New life task"><button class="btn icon" type="submit" aria-label="Add">${ico("plus", 18)}</button></form>
+        <div class="ltasks">${li.map(task).join("") || `<p class="dim lf-empty">Nothing on your plate here.</p>`}</div></div>
+    </div>`;
+}
+document.addEventListener("submit", e => {
+  if (e.target.id !== "lifeForm") return;
+  e.preventDefault(); const v = $("#lifeIn").value.trim(); if (!v) return;
+  create({ title: v, zone: "life" }); toast("Added to Life."); render(); setTimeout(() => { const i = $("#lifeIn"); if (i) i.focus(); }, 50);
+});
+
+/* ============================ VIEW: TIMELINE ============================
+   Today as time blocks. Same rules as desk.py (day_blocks / windows):
+   weekday plan 08:00-10:30, deep work 10:30-18:30 with a 15:30-16:30 energy dip for life tasks, shutdown 18:30-19:30,
+   free time after for side projects. Weekend: side projects in the morning, life in the afternoon, Sunday reset 17-20.
+   A card's slot is {date, start, end}. Open cards whose slot has ended are "carried": they ask for a reslot, no guilt. */
+const hm = x => { const [h, m] = x.split(":").map(Number); return h * 60 + m; };
+const fmtHm = n => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+const SLOT_DUR = { S: 15, M: 60, L: 120 };
+const isWeekend = (d = new Date()) => d.getDay() === 0 || d.getDay() === 6;
+const nowHm = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+function dayBlocks(date) {
+  const wd = new Date(date + "T12:00").getDay();
+  if (wd >= 1 && wd <= 5) return [["08:00", "10:30", "Plan", ""], ["10:30", "15:30", "Deep work", "work"], ["15:30", "16:30", "Energy dip", "life"],
+    ["16:30", "18:30", "Deep work", "work"], ["18:30", "19:30", "Shutdown", ""], ["19:30", "23:00", "Free time", "builds"]];
+  if (wd === 0) return [["09:00", "13:00", "Morning", "builds"], ["13:00", "17:00", "Afternoon", "life"], ["17:00", "20:00", "Sunday reset", ""], ["20:00", "23:00", "Evening", ""]];
+  return [["09:00", "13:00", "Morning", "builds"], ["13:00", "18:00", "Afternoon", "life"], ["18:00", "23:00", "Evening", ""]];
+}
+function zoneWindows(zone, date) {
+  const wd = new Date(date + "T12:00").getDay(), weekday = wd >= 1 && wd <= 5;
+  if (zone === "work") return weekday ? [[hm("10:30"), hm("19:00")]] : [];
+  if (zone === "builds") return weekday ? [[hm("19:30"), hm("23:00")]] : [[hm("09:00"), hm("13:00")]];
+  if (zone === "life") return weekday ? [[hm("15:30"), hm("16:30")]] : [[hm("13:00"), hm(wd === 0 ? "17:00" : "18:00")]];
+  const b = dayBlocks(date); return [[hm(b[0][0]), hm(b[b.length - 1][1])]];
+}
+const FIT_LABEL = { work: "SUPR", builds: "Side projects", life: "Life" };
+const slottedOn = date => openItems().filter(it => it.slot && it.slot.date === date).sort((a, b) => a.slot.start.localeCompare(b.slot.start));
+const isCarried = (it, t = dayKey(), n = nowHm()) => it.slot && (it.slot.date < t || (it.slot.date === t && hm(it.slot.end) <= n));
+// first free gap of `dur` minutes inside [a, b), not before `from`, avoiding other slots that day
+function freeGap(date, a, b, dur, from, skipId) {
+  const busy = slottedOn(date).filter(it => it.id !== skipId).map(it => [hm(it.slot.start), hm(it.slot.end)]);
+  for (let cur = Math.max(a, Math.ceil(from / 15) * 15); cur + 15 <= b; cur += 15) {
+    const end = Math.min(cur + dur, b);
+    if (end - cur >= Math.min(dur, 30) && !busy.some(([x, y]) => x < end && cur < y)) return [cur, end];
+  }
+  return null;
+}
+function slotInto(id, a, b) {
+  const it = items.find(i => i.id === id); if (!it) return;
+  const date = dayKey(), dur = SLOT_DUR[it.size] || 45, from = Math.max(hm(a), nowHm());
+  let g = freeGap(date, hm(a), hm(b), dur, from, id);
+  let warn = "";
+  if (!g) { const s0 = Math.min(Math.max(hm(a), Math.ceil(nowHm() / 15) * 15), hm(b) - 15); g = [s0, Math.min(s0 + dur, hm(b))]; warn = " It overlaps something, so check the block."; }
+  const z = it.zone || "inbox", ok = (zoneWindows(z, date)).some(([x, y]) => x <= g[0] && g[1] <= y);
+  if (z in FIT_LABEL && !ok) warn += z === "work" && isWeekend() ? " SUPR work is for weekdays." : ` ${FIT_LABEL[z]} usually go elsewhere in the day.`;
+  const before = it.slot || null;
+  save(id, { slot: { date, start: fmtHm(g[0]), end: fmtHm(g[1]) }, touchedAt: nowIso() });
+  toast(`${fmtHm(g[0])}–${fmtHm(g[1])}: ${it.title.slice(0, 40)}.${warn}`, () => save(id, { slot: before }));
+}
+// carried card: next free spot in its own window, today if there's room, else the next day
+function reslot(id) {
+  const it = items.find(i => i.id === id); if (!it) return;
+  const dur = SLOT_DUR[it.size] || 45, z = it.zone || "inbox";
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i); const date = dayKey(d);
+    for (const [a, b] of zoneWindows(z, date)) {
+      const g = freeGap(date, a, b, dur, i === 0 ? nowHm() : 0, id);
+      if (g) {
+        const before = it.slot;
+        save(id, { slot: { date, start: fmtHm(g[0]), end: fmtHm(g[1]) }, touchedAt: nowIso() });
+        toast(`Moved to ${i === 0 ? "today" : i === 1 ? "tomorrow" : new Date(date + "T12:00").toLocaleDateString("en", { weekday: "long" })} ${fmtHm(g[0])}.`, () => save(id, { slot: before }));
+        return;
+      }
+    }
+  }
+  toast("No free room in the next week. Unslot it or make room.");
+}
+let slotTarget = {};
+function unslottedFor(date) {
+  const t = date;
+  return openItems().filter(it => !(it.slot && it.slot.date === date)).sort((a, b) =>
+    (a.due && a.due <= t ? 0 : 1) - (b.due && b.due <= t ? 0 : 1) || (b.today ? 1 : 0) - (a.today ? 1 : 0) || (a.todayRank ?? 99) - (b.todayRank ?? 99) || (a.due || "9").localeCompare(b.due || "9") || a.title.localeCompare(b.title));
+}
+function openSlotPicker(a, b, name) {
+  slotTarget = { a, b }; const date = dayKey(), fit = (dayBlocks(date).find(x => x[0] === a) || [])[3];
+  const all = unslottedFor(date), top = all.filter(it => (it.due && it.due <= date) || it.today || (fit && it.zone === fit)), rest = all.filter(it => !top.includes(it));
+  const row = it => `<button class="tpickrow" data-act="tpick" data-id="${esc(it.id)}"><span class="zdot" style="--c:${zoneOf(it).color}"></span><span class="tt">${esc(it.title)}</span>${dueTag(it, date)}<span class="dim">${it.size ? it.size : ""}</span></button>`;
+  $("#slotHead").textContent = `${name} · ${a}–${b}`;
+  $("#slotList").innerHTML = (top.map(row).join("") || `<div class="dim" style="padding:10px 4px">Nothing on Today or due fits here.</div>`) +
+    (rest.length ? `<div class="sect" style="margin:14px 0 6px">Everything else</div>` + rest.map(row).join("") : "");
+  $("#slotModal").classList.add("open");
+}
+function dueTag(it, t = dayKey()) {
+  if (!it.due) return "";
+  return it.due < t ? `<span class="sc-due late">overdue · ${fmtDue(it.due)}</span>` : it.due === t ? `<span class="sc-due today">due today</span>` : `<span class="sc-due">${fmtDue(it.due)}</span>`;
+}
+function viewTimeline() {
+  const date = dayKey(), n = nowHm(), list = slottedOn(date);
+  const carriedOld = openItems().filter(it => it.slot && it.slot.date < date);
+  const tcard = it => {
+    const step = stepsLeft(it)[0], carried = isCarried(it, date, n);
+    return `<div class="tcard ${carried ? "carried" : ""}" style="--c:${zoneOf(it).color}">
+      <button class="tc-main" data-act="peek" data-id="${esc(it.id)}"><span class="tc-time">${it.slot.start}–${it.slot.end}</span>
+        <span class="tc-t">${esc(it.title)}</span>${dueTag(it, date)}
+        <span class="tc-s">${step ? "→ " + esc(step.t) : "No first step yet"}</span></button>
+      ${carried ? `<div class="tc-carry"><span>Carried. Still on it?</span><button class="btn sm" data-act="treslot" data-id="${esc(it.id)}">Reslot</button><button class="btn sm ghost" data-act="tunslot" data-id="${esc(it.id)}">Unslot</button></div>` : ""}
+    </div>`;
+  };
+  const blocks = dayBlocks(date).map(([a, b, name, fit]) => {
+    const inside = list.filter(it => it.slot.start >= a && it.slot.start < b), cur = n >= hm(a) && n < hm(b), past = n >= hm(b);
+    const pct = cur ? Math.round((n - hm(a)) / (hm(b) - hm(a)) * 100) : 0;
+    return `<section class="tblock ${cur ? "cur" : ""} ${past ? "past" : ""}" data-a="${a}" data-b="${b}" style="--minh:${Math.round((hm(b) - hm(a)) * .45)}px">
+      <div class="tb-h"><span class="tb-time">${a}–${b}</span><h3>${name}</h3>${fit ? `<span class="tb-fit">${FIT_LABEL[fit]}</span>` : ""}${cur ? `<span class="tb-now">Now · ${fmtHm(n)}</span>` : ""}</div>
+      ${cur ? `<div class="tb-bar"><i style="width:${pct}%"></i></div>` : ""}
+      <div class="tb-cards">${inside.map(tcard).join("")}</div>
+      ${past && !inside.length ? "" : `<button class="tb-add" data-act="tadd" data-a="${a}" data-b="${b}" data-name="${esc(name)}">${ico("plus", 18)}<span>${inside.length ? "Add another" : "Tap to add a card"}</span></button>`}
+    </section>`;
+  }).join("");
+  const outside = list.filter(it => !dayBlocks(date).some(([a, b]) => it.slot.start >= a && it.slot.start < b));
+  const tray = unslottedFor(date).filter(it => !it.slot && (it.today || (it.due && it.due <= addDays(2))));
+  const pick = it => `<div class="tpick" data-id="${esc(it.id)}"><span class="zdot" style="--c:${zoneOf(it).color}"></span><span class="tt">${esc(it.title)}</span>${dueTag(it, date)}</div>`;
+  return `${carriedOld.length ? `<section class="tcarry"><div class="ph"><h3>Carried over</h3><span class="n">${carriedOld.length}</span><span class="act dim" style="font-size:var(--t-sub)">Plans move. Pick a new spot.</span></div><div class="tb-cards">${carriedOld.map(tcard).join("")}</div></section>` : ""}
+    <div class="tgrid"><div class="tline">${blocks}${outside.length ? `<section class="tblock"><div class="tb-h"><h3>Outside the day</h3></div><div class="tb-cards">${outside.map(tcard).join("")}</div></section>` : ""}</div>
+    <aside class="ttray"><div class="ph"><h3>To slot</h3><span class="n">${tray.length}</span></div>
+      <div class="ttray-list">${tray.map(pick).join("") || `<div class="empty">Everything on Today or due soon has a slot.</div>`}</div>
+      <p class="dim ttip">Drag a card onto a block, or tap a block. Task Master can propose the whole day: "plan my day".</p></aside></div>`;
+}
+/* drag from the To slot tray onto a block (touch: hold briefly first, so scrolling still works) */
+let tdrag = null;
+$("#body").addEventListener("pointerdown", e => {
+  const c = e.target.closest(".tpick"); if (!c) return;
+  const st = { id: c.dataset.id, el: c, x: e.clientX, y: e.clientY, on: false, ghost: null, timer: null, touch: e.pointerType !== "mouse" };
+  tdrag = st;
+  if (st.touch) st.timer = setTimeout(() => { if (tdrag === st) startTDrag(st, st.x, st.y); }, 220);
+});
+function startTDrag(st, x, y) {
+  st.on = true; st.ghost = st.el.cloneNode(true); st.ghost.classList.add("dragghost");
+  const r = st.el.getBoundingClientRect(); st.ghost.style.width = r.width + "px"; st.dx = x - r.left; st.dy = y - r.top;
+  document.body.appendChild(st.ghost); st.el.classList.add("lifted"); moveTDrag(x, y);
+}
+function moveTDrag(x, y) {
+  if (!tdrag || !tdrag.ghost) return;
+  tdrag.ghost.style.left = (x - tdrag.dx) + "px"; tdrag.ghost.style.top = (y - tdrag.dy) + "px";
+  document.querySelectorAll(".tblock.drop").forEach(b => b.classList.remove("drop"));
+  const under = document.elementFromPoint(x, y); const b = under && under.closest(".tblock[data-a]"); if (b) b.classList.add("drop");
+}
+window.addEventListener("pointermove", e => {
+  if (!tdrag) return;
+  if (!tdrag.on) {
+    const far = Math.hypot(e.clientX - tdrag.x, e.clientY - tdrag.y) > 6;
+    if (tdrag.touch) { if (far) { clearTimeout(tdrag.timer); tdrag = null; } return; }   // finger moved first: it's a scroll
+    if (far) startTDrag(tdrag, e.clientX, e.clientY); else return;
+  }
+  e.preventDefault(); moveTDrag(e.clientX, e.clientY);
+}, { passive: false });
+function endTDrag(e, cancel) {
+  if (!tdrag) return; const st = tdrag; tdrag = null; clearTimeout(st.timer);
+  if (!st.on) return;
+  suppressClick = true; setTimeout(() => suppressClick = false, 60);
+  st.ghost.remove(); st.el.classList.remove("lifted");
+  document.querySelectorAll(".tblock.drop").forEach(b => b.classList.remove("drop"));
+  if (cancel) return;
+  const under = document.elementFromPoint(e.clientX, e.clientY), b = under && under.closest(".tblock[data-a]");
+  if (b) slotInto(st.id, b.dataset.a, b.dataset.b);
+}
+window.addEventListener("pointerup", e => endTDrag(e, false));
+window.addEventListener("pointercancel", e => endTDrag(e, true));
 
 /* auto-arrange: tiles pack into columns with no gaps (grid rows of 4px, each tile spans its height),
    and glide to their new spot when the order changes */
@@ -837,6 +1038,7 @@ let suppressClick = false;
 document.addEventListener("click", e => {
   if (suppressClick) { suppressClick = false; e.preventDefault(); return; }
   const el = e.target.closest("[data-act]");
+  if (lifeOpen && innerWidth < 1100 && !e.target.closest("#life, .lifebtn, .peek, .modal, .toast")) { setLife(false); if (!el) return; }
   if ($("#modes").classList.contains("open") && !e.target.closest("#modes") && !(el && el.dataset.act === "modes")) { closeModes(); if (!el) return; }
   if (!el) return;
   const a = el.dataset.act, id = el.dataset.id;
@@ -863,6 +1065,13 @@ document.addEventListener("click", e => {
     case "up": moveToday(id, -1); break;
     case "down": moveToday(id, 1); break;
     case "snooze": openSnooze(id); break;
+    case "life": setLife(!lifeOpen); break;
+    case "lifeclose": setLife(false); break;
+    case "tadd": openSlotPicker(el.dataset.a, el.dataset.b, el.dataset.name); break;
+    case "tpick": slotInto(id, slotTarget.a, slotTarget.b); closeModal("#slotModal"); break;
+    case "tcancel": closeModal("#slotModal"); break;
+    case "treslot": reslot(id); break;
+    case "tunslot": { const b = items.find(i => i.id === id); const before = b && b.slot; save(id, { slot: null }); toast("Taken off the timeline.", () => save(id, { slot: before })); break; }
     case "snzpick": snooze(snoozeFor, el.dataset.v); break;
     case "snzdate": { const v = $("#snzDate").value; if (v) snooze(snoozeFor, v); else $("#snzDate").focus(); break; }
     case "snzcancel": snoozeFor = null; closeModal("#snoozeModal"); break;
@@ -911,13 +1120,15 @@ $("#stepIn2").addEventListener("keydown", e => { if (e.key === "Enter") { e.prev
 $("#dumpTxt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveDump(); } });
 document.addEventListener("keydown", e => {
   const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
-  if (e.key === "Escape") { if ($("#modes").classList.contains("open")) { closeModes(); return; } if ($("#stepModal").classList.contains("open")) { closeModal("#stepModal"); return; } if ($("#snoozeModal").classList.contains("open")) { closeModal("#snoozeModal"); return; } if ($("#habitModal").classList.contains("open")) { closeModal("#habitModal"); return; } if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
+  if (e.key === "Escape") { if ($("#modes").classList.contains("open")) { closeModes(); return; } if ($("#stepModal").classList.contains("open")) { closeModal("#stepModal"); return; } if ($("#snoozeModal").classList.contains("open")) { closeModal("#snoozeModal"); return; } if ($("#slotModal").classList.contains("open")) { closeModal("#slotModal"); return; } if ($("#habitModal").classList.contains("open")) { closeModal("#habitModal"); return; } if ($("#confirm").classList.contains("open")) closeModal("#confirm"); else if ($("#dump").classList.contains("open")) closeModal("#dump"); else if (peekId) closePeek(); return; }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "n" || e.key === "N") { e.preventDefault(); openDump(); }
   if (e.key === "1") { view = "now"; store("view", view); render(); }
   if (e.key === "2") { view = "today"; store("view", view); render(); }
-  if (e.key === "3") { view = "board"; store("view", view); render(); }
-  if (e.key === "4") { view = "done"; store("view", view); render(); }
+  if (e.key === "3") { view = "timeline"; store("view", view); render(); }
+  if (e.key === "4") { view = "board"; store("view", view); render(); }
+  if (e.key === "5") { view = "done"; store("view", view); render(); }
+  if (e.key === "l" || e.key === "L") { e.preventDefault(); setLife(!lifeOpen); }
   if (e.key === "r" || e.key === "R") { e.preventDefault(); refreshNow(); }
   if (e.key === "m" || e.key === "M") { e.preventDefault(); $("#modes").classList.contains("open") ? closeModes() : openModes(); }
 });

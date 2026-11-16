@@ -13,7 +13,7 @@
 <link rel="icon" href="icon-180.png">
 <link rel="manifest" href="manifest.json">
 <title>Brain Desk</title>
-<link rel="stylesheet" href="styles.css?v=ipad8">
+<link rel="stylesheet" href="styles.css?v=tl1">
 </head>
 <body>
 <div class="app">
@@ -23,6 +23,7 @@
     <div class="body" id="body"></div>
   </main>
 </div>
+<aside class="lifebar" id="life" aria-label="Life tasks and habits"></aside>
 <div class="pop" id="modes" role="dialog" aria-label="Modes"></div>
 
 <div class="scrim" id="scrim"></div>
@@ -89,6 +90,14 @@
     <div class="mfoot" style="margin:0 -18px"><span class="hint"></span><button class="btn" data-act="snzcancel">Cancel</button></div>
   </div>
 </div>
+<div class="modal" id="slotModal" role="dialog" aria-label="Add a card to this block">
+  <div class="mbox" style="padding:22px 22px 6px">
+    <div class="sect" style="margin:0">Add to</div>
+    <div id="slotHead" style="font-weight:650;font-size:var(--t-title3);margin:4px 0 12px"></div>
+    <div id="slotList" class="slotlist"></div>
+    <div class="mfoot" style="margin:10px -22px 0"><span class="hint">Goes in the next free spot in this block.</span><button class="btn" data-act="tcancel">Cancel</button></div>
+  </div>
+</div>
 <div class="modal" id="habitModal" role="dialog" aria-label="Edit habits">
   <div class="mbox" style="padding:22px 22px 6px">
     <div class="sect" style="margin:0 0 10px">Habits you want to do most days</div>
@@ -101,6 +110,6 @@
   <div class="cbox"><p id="cMsg"></p><div class="acts"><button class="btn" data-act="cno">Keep it</button><button class="btn primary" data-act="cyes">Delete</button></div></div>
 </div>
 <div class="toast" id="toast" role="status"></div>
-<script src="app.js?v=ipad8"></script>
+<script src="app.js?v=tl1"></script>
 </body>
 </html>
