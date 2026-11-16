@@ -371,7 +371,7 @@ function renderBar(mode) {
   const tab = (id, label, cnt) => `<button class="tab" role="tab" data-act="view" data-v="${id}" aria-selected="${view === id}">${label}${cnt ? `<span class="cnt">${cnt}</span>` : ""}</button>`;
   $("#bar").innerHTML = `<button class="modebtn glass" data-act="modes" style="--tint:${m.tint}" aria-label="Mode: ${m.name}. Change mode" aria-haspopup="dialog">
       <span class="mi">${ico(m.icon, 17)}</span><span class="nm">${m.name}</span>${override ? `<span class="live" title="Turned on by hand"></span>` : ""}<span class="chev">${ico("chev", 14)}</span></button>
-    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? Math.min(t, MUST) + "/" + MUST + (t > MUST ? " +" + (t - MUST) : "") : "")}${tab("timeline", "Timeline", "")}${tab("board", "All", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
+    <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", "")}${tab("timeline", "Timeline", "")}${tab("board", "All", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
     <div class="bar-r"><span class="clock" id="clk">${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>
       <button class="iconbtn glass refresh" id="refreshBtn" data-act="refresh" aria-label="Refresh">${ico("refresh", 20)}<span class="sync" id="sync" data-s="${syncState}"></span></button>
       <button class="iconbtn glass lifebtn ${lifeOpen ? "on" : ""}" data-act="life" aria-label="Life tasks (L)" aria-pressed="${lifeOpen}">${ico("leaf", 20)}${lifeBadge() ? `<span class="badge">${lifeBadge()}</span>` : ""}</button>
