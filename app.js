@@ -369,7 +369,7 @@ function renderBar(mode) {
     <nav class="tabs glass" role="tablist" aria-label="Views">${tab("now", "Now", "")}${tab("today", "Today", t ? Math.min(t, MUST) + "/" + MUST + (t > MUST ? " +" + (t - MUST) : "") : "")}${tab("timeline", "Timeline", "")}${tab("board", "Board", openItems().length)}${tab("done", "Done", w.total || "")}</nav>
     <div class="bar-r"><span class="clock" id="clk">${new Date().toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}</span>
       <button class="iconbtn glass refresh" id="refreshBtn" data-act="refresh" aria-label="Refresh">${ico("refresh", 20)}<span class="sync" id="sync" data-s="${syncState}"></span></button>
-      <button class="iconbtn glass lifebtn ${lifeOpen ? "on" : ""}" data-act="life" aria-label="Life and habits (L)" aria-pressed="${lifeOpen}">${ico("leaf", 20)}${lifeBadge() ? `<span class="badge">${lifeBadge()}</span>` : ""}</button>
+      <button class="iconbtn glass lifebtn ${lifeOpen ? "on" : ""}" data-act="life" aria-label="Life tasks (L)" aria-pressed="${lifeOpen}">${ico("leaf", 20)}${lifeBadge() ? `<span class="badge">${lifeBadge()}</span>` : ""}</button>
       <button class="addbtn" data-act="dump" aria-label="Dump a thought (N)">${ico("plus", 22)}</button></div>`;
 }
 function renderModes(mode) {
@@ -701,7 +701,7 @@ const lifeItems = () => { const t = dayKey(); return openItems().filter(it => it
   (a.due && a.due <= t ? 0 : 1) - (b.due && b.due <= t ? 0 : 1) || (b.today ? 1 : 0) - (a.today ? 1 : 0) || (a.due || "9").localeCompare(b.due || "9") || touched(b).localeCompare(touched(a))); };
 function lifeBadge() {
   const t = dayKey();
-  return lifeItems().filter(it => it.due && it.due <= t).length + habitList().filter(h => !(h.days && h.days[t])).length;
+  return lifeItems().filter(it => it.due && it.due <= t).length;
 }
 function renderLife() {
   const el = $("#life"); if (!el) return;
@@ -713,10 +713,9 @@ function renderLife() {
   const task = it => { const step = stepsLeft(it)[0];
     return `<div class="ltask"><button class="st" data-act="done" data-id="${esc(it.id)}" aria-label="Mark done">${statusIcon(it).replace(/width="24" height="24"/, 'width="22" height="22"')}</button>
       <button class="lt-main" data-act="peek" data-id="${esc(it.id)}"><span class="lt-t">${esc(it.title)}</span>${step ? `<span class="lt-s">→ ${esc(step.t)}</span>` : ""}</button>${dueTag(it, t)}</div>`; };
+  // habits are hidden for now (he asked); they're still saved and Task Master can still tick them
   el.innerHTML = `<div class="lf-h"><span class="lf-ic">${ico("leaf", 18)}</span><h2>Life</h2><button class="btn sm icon" data-act="lifeclose" aria-label="Close">${ico("x", 18)}</button></div>
     <div class="lf-b">
-      <div class="lf-sec"><div class="lf-sh"><h3>Habits</h3><span class="n">${doneN}/${hs.length}</span><button class="linkbtn" data-act="habitedit">${hs.length ? "Edit" : "Add"}</button></div>
-        ${hs.length ? `<div class="lhabits">${hs.map(habit).join("")}</div>` : `<p class="dim lf-empty">The few things you want to do most days.</p>`}</div>
       <div class="lf-sec"><div class="lf-sh"><h3>Life tasks</h3><span class="n">${li.length}</span></div>
         <form class="lf-add" id="lifeForm" autocomplete="off"><input class="field" id="lifeIn" type="text" placeholder="Get the kitchen window fixed" aria-label="New life task"><button class="btn icon" type="submit" aria-label="Add">${ico("plus", 18)}</button></form>
         <div class="ltasks">${li.map(task).join("") || `<p class="dim lf-empty">Nothing on your plate here.</p>`}</div></div>
