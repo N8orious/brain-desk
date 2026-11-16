@@ -230,7 +230,6 @@ svg{display:block;flex:none}
 /* ---------- now: workstreams ---------- */
 .streams{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));grid-auto-rows:4px;column-gap:16px;row-gap:16px;align-items:start}
 .stream{background:var(--panel);border-radius:22px;padding:16px 18px 14px;display:flex;flex-direction:column;gap:12px;position:relative;overflow:hidden;transition:opacity .2s}
-.stream::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--zc)}
 .stream.off{opacity:.6}
 .stream .sh{display:flex;align-items:center;gap:8px}
 .stream .sa{font-size:var(--t-foot);font-weight:600;color:var(--text-3);flex:1}
@@ -324,12 +323,11 @@ body.life-open .lifebar{transform:none}
 .tb-bar{height:4px;border-radius:4px;background:var(--line)}
 .tb-bar i{display:block;height:100%;border-radius:4px;background:var(--accent)}
 .tb-cards{display:flex;flex-direction:column;gap:8px}
-.tcard{border-radius:14px;background:var(--bg);border-left:4px solid var(--c);overflow:hidden}
-.tc-main{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 12px;width:100%;text-align:left;padding:10px 12px;min-height:var(--hit)}
-.tc-time{font-size:var(--t-foot);font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums;padding-top:2px}
+.tcard{border-radius:14px;background:var(--bg);overflow:hidden}
+.tc-main{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:baseline;gap:2px 12px;width:100%;text-align:left;padding:10px 12px;min-height:var(--hit)}
+.tc-time{display:flex;align-items:center;gap:7px;font-size:var(--t-foot);font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums;padding-top:2px}
 .tc-t{font-weight:600;line-height:1.3}
 .tc-s{grid-column:2/-1;font-size:var(--t-foot);color:var(--text-2)}
-.tcard.carried{border-left-style:dashed}
 .tcard.carried .tc-time{color:var(--text-3)}
 .tc-carry{display:flex;align-items:center;gap:8px;padding:0 10px 10px 12px;font-size:var(--t-foot);color:var(--text-2)}
 .tc-carry span{flex:1}

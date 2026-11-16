@@ -819,7 +819,7 @@ function viewTimeline() {
   const tcard = it => {
     const step = stepsLeft(it)[0], carried = isCarried(it, date, n);
     return `<div class="tcard ${carried ? "carried" : ""}" style="--c:${zoneOf(it).color}">
-      <button class="tc-main" data-act="peek" data-id="${esc(it.id)}"><span class="tc-time">${it.slot.start}–${it.slot.end}</span>
+      <button class="tc-main" data-act="peek" data-id="${esc(it.id)}"><span class="tc-time"><span class="zdot" style="--c:${zoneOf(it).color}"></span>${it.slot.start}–${it.slot.end}</span>
         <span class="tc-t">${esc(it.title)}</span>${dueTag(it, date)}
         <span class="tc-s">${step ? "→ " + esc(step.t) : "No first step yet"}</span></button>
       ${carried ? `<div class="tc-carry"><span>Carried. Still on it?</span><button class="btn sm" data-act="treslot" data-id="${esc(it.id)}">Reslot</button><button class="btn sm ghost" data-act="tunslot" data-id="${esc(it.id)}">Unslot</button></div>` : ""}
